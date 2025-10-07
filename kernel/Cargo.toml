@@ -1,14 +1,16 @@
 [package]
-name = "molcore"
-version = "0.1.0"
-edition = "2024"
-authors = ["MolCrafts"]
-description = "Molcrafts molecular modeling core library"
-readme = "README.md"
-homepage = "https://github.com/Roy-Kid/molcore"
-repository = "https://github.com/Roy-Kid/molcore"
-license = "BSD-3-Clause"
+name = "molcore-kernel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
 keywords = ["computational", "chemistry", "molecular", "science"]
 categories = ["science", "data-structures"]
+
+[lib]
+name = "molcore"
 
 [dependencies]
