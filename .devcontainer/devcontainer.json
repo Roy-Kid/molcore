@@ -1,0 +1,13 @@
+{
+    "name": "MolCrafts - molcore",
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+    "features": {
+        "ghcr.io/devcontainers/features/rust:1": {}
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": []
+        }
+    },
+    "remoteUser": "root"
+}
