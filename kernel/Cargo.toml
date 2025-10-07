@@ -12,9 +12,3 @@ keywords = ["computational", "chemistry", "molecular", "science"]
 categories = ["science", "data-structures"]
 
 [dependencies]
-
-[workspace]
-members = [
-    "kernel",
-    "ffi"
-]
