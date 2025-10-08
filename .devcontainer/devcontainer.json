@@ -2,7 +2,9 @@
     "name": "MolCrafts - molcore",
     "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
     "features": {
-        "ghcr.io/devcontainers/features/rust:1": {}
+        "ghcr.io/devcontainers/features/rust:1": {},
+        "ghcr.io/devcontainers/features/anaconda:1": {},
+        "ghcr.io/devcontainers/features/common-utils:2": {}
     },
     "customizations": {
         "vscode": {

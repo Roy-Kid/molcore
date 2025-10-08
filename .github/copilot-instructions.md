@@ -1,9 +1,9 @@
-# Copilot Instructions for molcore
+# Copilot Instructions for molomni
 
 ## Project Overview
-molcore is a Rust molecular modeling library with a workspace architecture containing two main crates:
-- **kernel** (`molcore-kernel`): Core library with element data, array abstractions, and a custom ECS
-- **ffi** (`molcore-ffi`): `no_std` compatible C FFI layer (`cdylib` + `rlib`) with `#[no_mangle]` exports
+molomni is a Rust molecular modeling library with a workspace architecture containing two main crates:
+ - **kernel** (`molomni-core`): Core library with element data, array abstractions, and a custom ECS
+ - **ffi** (`molomni-c`): `no_std` compatible C FFI layer (`cdylib` + `rlib`) with `#[unsafe(no_mangle)]` exports
 
 This is a backend for molpy (Python molecular modeling toolkit). The FFI layer enables interop with Python/C.
 
@@ -11,7 +11,7 @@ This is a backend for molpy (Python molecular modeling toolkit). The FFI layer e
 
 ### Workspace Structure
 - Root `Cargo.toml` defines workspace with shared metadata (version, authors, license, etc.)
-- `kernel/` builds as `molcore` lib (note: lib name differs from package name in `Cargo.toml`)
+- `kernel/` builds as `molomni` lib (note: lib name differs from package name in `Cargo.toml`)
 - `ffi/` depends on `kernel` via path dependency, exports C ABI
 - Tests live in `kernel/tests/` using integration test pattern with nested modules
 
@@ -29,7 +29,7 @@ This is a backend for molpy (Python molecular modeling toolkit). The FFI layer e
    - Systems are `Fn(&mut World)` closures, registered via `Schedule::add_system()`
 
 ### FFI Layer Conventions
-- All exports use `#[no_mangle]` and `extern "C"`
+- All exports use `#[unsafe(no_mangle)]` and `extern "C"`
 - Prefix all symbols with `mc_` (e.g., `mc_version`, `mc_status_error`)
 - Status codes: `mc_status_t = i32`, where `0 = success`, non-zero = error
 - Header in `ffi/include/molcore.h` manually maintained (no cbindgen yet)
@@ -76,7 +76,7 @@ Element { z: 2, symbol: "He", name: "Helium", atomic_mass: 4.003 }
 4. For multi-component queries, use `world.query2::<A, B>()` (returns iterator of `(Entity, (&A, &B))`)
 
 ### Extending FFI
-1. Add `#[no_mangle] pub extern "C"` function in `ffi/src/`
+1. Add `#[unsafe(no_mangle)] pub extern "C"` function in `ffi/src/`
 2. Use `mc_` prefix and `mc_status_t` return type
 3. Update `ffi/include/molcore.h` manually
 4. Handle null pointers safely (check before dereferencing)

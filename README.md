@@ -1,109 +1,46 @@
-# molcore
+# molomni
 
-[![Crates.io](https://img.shields.io/crates/v/molcore.svg)](https://crates.io/crates/molcore)
-[![Documentation](https://docs.rs/molcore/badge.svg)](https://docs.rs/molcore)
+[![Crates.io](https://img.shields.io/crates/v/molomni.svg)](https://crates.io/crates/molomni)
+[![Documentation](https://docs.rs/molomni/badge.svg)](https://docs.rs/molomni)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
-A Rust library providing core molecular modeling functionality, including element data and molecular representations.
+## todo list
+- [ ] Frame and Block: static data structures for aligned array
+- [ ] ForceField: parameter storage and retrieval
+- [ ] Array: typed n-dimensional array with axis labels
+- [ ] Box: Simulation box with periodic boundary conditions
+- [ ] IO: readers and writers for common file formats (XYZ frame and trajectory)
+- [ ] c-api: C bindings for core functionality
+- [ ] Python bindings via c-api
 
-**Note**: This is a work-in-progress backend for molpy.
+## Python bindings (experimental)
 
-## Features
+This repo includes a minimal Python package skeleton under `python/` to load the C FFI and provide zero-copy helpers for `Vec3` using NumPy buffers.
 
-- 🧪 **Element Data**: Complete periodic table information
-  - Access elements by atomic number or symbol
-  - Case-insensitive symbol lookup
-  - Atomic mass, names, and properties
-  
-- 🚀 **Zero Dependencies**: Lightweight and fast
-- 🔒 **Type Safe**: Leverages Rust's type system for safety
-- 📦 **`no_std` Compatible**: Can be used in embedded environments
-
-## Installation
-
-Add this to your `Cargo.toml`:
-
-```toml
-[dependencies]
-molcore = "0.1"
-```
-
-## Usage
-
-```rust
-use molcore::core::Element;
-
-fn main() {
-    // Look up elements by atomic number
-    let hydrogen = Element::by_number(1);
-    println!("{}: {}", hydrogen.symbol, hydrogen.name);
-    // Output: H: Hydrogen
-    
-    // Look up elements by symbol (case-insensitive)
-    let h1 = Element::by_symbol("H");
-    let h2 = Element::by_symbol("h");
-    assert_eq!(h1 as *const _, h2 as *const _); // Same reference
-    
-    // Access element properties
-    println!("Atomic mass: {}", hydrogen.atomic_mass);
-    println!("Atomic number: {}", hydrogen.z);
-}
-```
-
-## API Overview
-
-### `Element` Struct
-
-```rust
-pub struct Element {
-    pub z: u8,                    // Atomic number
-    pub symbol: &'static str,     // Element symbol
-    pub name: &'static str,       // Element name
-    pub atomic_mass: f32,         // Atomic mass in u
-}
-```
-
-### Methods
-
-- `Element::by_number(z: u8) -> &'static Element` - Find element by atomic number
-- `Element::by_symbol(sym: &str) -> &'static Element` - Find element by symbol (case-insensitive)
-
-### Panics
-
-Both lookup methods will panic with descriptive messages if the element is not found:
-- `by_number`: panics with "invalid atomic number"
-- `by_symbol`: panics with "invalid symbol"
-
-## Development
-
-### Running Tests
+- Generate ctypes declarations from the C header:
 
 ```bash
-cargo test
+python3 python/scripts/generate-declarations.py
 ```
 
-### Building Documentation
+- Build the C FFI shared library:
 
 ```bash
-cargo doc --open
+cargo build -p molomni-c --release
 ```
 
-## Roadmap
+- Try the Vec3 helpers in Python:
 
-- [ ] Complete periodic table data (currently only H)
-- [ ] Molecular structure representations
-- [ ] Bond information
-- [ ] Additional element properties (electronegativity, radius, etc.)
-- [ ] Python bindings via PyO3
+```python
+import numpy as np
+from python.molcore_c import Vec3f32, Vec3f64
 
-## Contributing
+arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+v = Vec3f32.from_numpy(arr)  # passes pointer to Rust C-API without copying
+out = v.to_numpy()           # returns a new numpy array with values
+print(out)                   # [1. 2. 3.]
+```
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the BSD 3-Clause License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-Part of the MolCrafts project ecosystem.
+Notes
+- The Python wrapper uses `ctypes` and expects the built library in `target/{debug,release}`.
+- The conversion functions pass raw pointers from NumPy to the C API, avoiding copies when the array is C-contiguous with matching dtype.
