@@ -7,3 +7,6 @@ description = "MolCrafts molecular modeling core library (molomni)"
 homepage = "https://github.com/MolCrafts/molomni"
 repository = "https://github.com/MolCrafts/molomni"
 license = "BSD-3-Clause"
+
+[dependencies]
+polars = { version = "x", features = ["lazy"] }
