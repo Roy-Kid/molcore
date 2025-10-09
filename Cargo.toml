@@ -1,11 +1,5 @@
-[workspace]
-resolver = "2"
-members = [
-    "molomni-core",
-    "molomni-c"
-]
-
-[workspace.package]
+[package]
+name = "molomni"
 version = "0.1.0"
 edition = "2024"
 authors = ["MolCrafts"]
@@ -13,5 +7,3 @@ description = "MolCrafts molecular modeling core library (molomni)"
 homepage = "https://github.com/MolCrafts/molomni"
 repository = "https://github.com/MolCrafts/molomni"
 license = "BSD-3-Clause"
-
-[workspace.dependencies]
