@@ -13,13 +13,13 @@ macro_rules! array {
     // 1D（带一层[]）
     ( [ $( $x:expr ),+ $(,)? ] ) => {{
         let v = vec![ $( $x ),* ];
-        $crate::core::array::NdArray::new(vec![v.len()], v)
+    $crate::core::array::NdArray::from_vec(vec![v.len()], v)
     }};
 
     // 1D（无括号，兼容写法）：转发到带括号分支
     ( $( $x:expr ),+ $(,)? ) => {{
         let v = vec![ $( $x ),* ];
-        $crate::core::array::NdArray::new(vec![v.len()], v)
+    $crate::core::array::NdArray::from_vec(vec![v.len()], v)
     }};
 
     // 空数组
@@ -39,6 +39,6 @@ macro_rules! array {
     }};
     ( @dispatch [ $( $x:expr ),+ $(,)? ] ) => {{
         let v = vec![ $( $x ),* ];
-        $crate::core::array::NdArray::new(vec![v.len()], v)
+    $crate::core::array::NdArray::from_vec(vec![v.len()], v)
     }};
 }

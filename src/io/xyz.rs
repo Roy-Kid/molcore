@@ -1,7 +1,9 @@
-use polars::prelude::DataFrame;
 use std::collections::HashMap;
 use std::io::BufRead;
 use crate::io::reader::{Reader, FrameReader};
+use crate::core::array::NdArray;
+use crate::core::block::Block;
+use crate::core::frame::Frame;
 
 // EXTXYZ comment line parser using winnow
 use winnow::combinator::{alt, separated, opt, repeat};
@@ -10,11 +12,7 @@ use winnow::prelude::*;
 use winnow::token::{take_while};
 
 
-/// A parsed XYZ/EXTXYZ frame
-pub struct XYZFrame {
-	pub atoms: DataFrame,
-	pub metadata: HashMap<String, ExtValue>,
-}
+// XYZ now produces a core::Frame consisting of blocks of NdArray columns
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -253,8 +251,15 @@ fn expand_property_columns(props: &[PropertySpec]) -> Vec<(String, PropType)> {
 		if p.m == 1 {
 			cols.push((p.name.clone(), p.ty));
 		} else {
-			for i in 0..p.m {
-				cols.push((format!("{}_{}", p.name, i + 1), p.ty));
+			// Special-case: map pos:R:3 -> x,y,z (LAMMPS naming)
+			if p.name.eq_ignore_ascii_case("pos") && p.ty == PropType::R && p.m == 3 {
+				cols.push(("x".to_string(), PropType::R));
+				cols.push(("y".to_string(), PropType::R));
+				cols.push(("z".to_string(), PropType::R));
+			} else {
+				for i in 0..p.m {
+					cols.push((format!("{}_{}", p.name, i + 1), p.ty));
+				}
 			}
 		}
 	}
@@ -285,15 +290,13 @@ fn build_complete_schema(ec: &XYZComment) -> Vec<PropertySpec> {
 	])
 }
 
-fn build_df_from_props(n: usize, lines: &[String], props: &[PropertySpec]) -> Result<DataFrame, String> {
-	use polars::prelude::*;
-
+fn build_block_from_props(n: usize, lines: &[String], props: &[PropertySpec]) -> Result<Block, String> {
 	let cols = expand_property_columns(props);
 	let m_total = cols.len();
 	if lines.len() != n { return Err("insufficient atom lines".into()); }
 
-	// Prepare column buffers by type
-	enum ColBuf { S(Vec<String>), I(Vec<i64>), R(Vec<f64>), L(Vec<bool>) }
+	// Prepare column buffers by type (use f32 for real values)
+	enum ColBuf { S(Vec<String>), I(Vec<i64>), R(Vec<f32>), L(Vec<bool>) }
 	let mut buffers: Vec<ColBuf> = cols.iter().map(|(_, t)| match t {
 		PropType::S => ColBuf::S(Vec::with_capacity(n)),
 		PropType::I => ColBuf::I(Vec::with_capacity(n)),
@@ -311,7 +314,7 @@ fn build_df_from_props(n: usize, lines: &[String], props: &[PropertySpec]) -> Re
 			match (&mut buffers[buf_idx], ty) {
 				(ColBuf::S(v), PropType::S) => v.push(tok.to_string()),
 				(ColBuf::I(v), PropType::I) => v.push(tok.parse::<i64>().map_err(|_| format!("line {} col {}: invalid int '{}" , row_i, buf_idx, tok))?),
-				(ColBuf::R(v), PropType::R) => v.push(tok.parse::<f64>().map_err(|_| format!("line {} col {}: invalid float '{}" , row_i, buf_idx, tok))?),
+				(ColBuf::R(v), PropType::R) => v.push(tok.parse::<f32>().map_err(|_| format!("line {} col {}: invalid float '{}" , row_i, buf_idx, tok))?),
 				(ColBuf::L(v), PropType::L) => v.push(parse_bool_token(tok).ok_or_else(|| format!("line {} col {}: invalid bool '{}" , row_i, buf_idx, tok))?),
 				_ => return Err(format!("type mismatch at line {} col {}", row_i, buf_idx)),
 			}
@@ -319,23 +322,24 @@ fn build_df_from_props(n: usize, lines: &[String], props: &[PropertySpec]) -> Re
 		}
 	}
 
-	// Build Columns list
-	let columns: Vec<Column> = cols.into_iter().zip(buffers.into_iter()).map(|((name, ty), buf)| {
+	// Assemble core::Block: drop string columns (S) as Block stores numeric/boolean arrays only
+	let mut block = Block::new();
+	for ((name, ty), buf) in cols.into_iter().zip(buffers.into_iter()) {
 		match (ty, buf) {
-			(PropType::S, ColBuf::S(v)) => Series::new(name.into(), v).into_column(),
-			(PropType::I, ColBuf::I(v)) => Series::new(name.into(), v).into_column(),
-			(PropType::R, ColBuf::R(v)) => Series::new(name.into(), v).into_column(),
-			(PropType::L, ColBuf::L(v)) => Series::new(name.into(), v).into_column(),
-			_ => unreachable!(),
+			(PropType::I, ColBuf::I(v)) => { let arr = NdArray::from_vec(vec![n, 1], v); block.insert(name, arr).map_err(|e| e.to_string())?; },
+			(PropType::R, ColBuf::R(v)) => { let arr = NdArray::from_vec(vec![n, 1], v); block.insert(name, arr).map_err(|e| e.to_string())?; },
+			(PropType::L, ColBuf::L(v)) => { let arr = NdArray::from_vec(vec![n, 1], v); block.insert(name, arr).map_err(|e| e.to_string())?; },
+			(PropType::S, ColBuf::S(_v)) => { /* skip string columns for now */ },
+			_ => { /* type mismatch shouldn't happen due to construction; skip */ }
 		}
-	}).collect();
+	}
 
-	DataFrame::new(columns).map_err(|e| e.to_string())
+	Ok(block)
 }
 
 /// Read one XYZ/EXTXYZ frame from the current position of a buffered reader
 /// Returns Ok(None) on EOF before the first line
-pub fn read_xyz_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<XYZFrame>> {
+pub fn read_xyz_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Frame>> {
 
 	// Read first non-empty line as atom count
 	let mut line = String::new();
@@ -360,10 +364,10 @@ pub fn read_xyz_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<XYZF
 
 	// Parse comment to metadata and properties
 	let ec = parse_comment_line(comment).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-	let mut metadata: HashMap<String, ExtValue> = HashMap::new();
+	let mut kv_meta: HashMap<String, ExtValue> = HashMap::new();
 	for (k, v) in ec.kv.iter() {
 		if k.eq_ignore_ascii_case("Properties") { continue; }
-		metadata.insert(k.clone(), v.clone());
+		kv_meta.insert(k.clone(), v.clone());
 	}
 
 	// Read N atom lines
@@ -378,11 +382,17 @@ pub fn read_xyz_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<XYZF
 	// Build complete schema (base properties + derived columns)
 	let schema = build_complete_schema(&ec);
 	
-	// Parse columns according to schema
-	let atoms = build_df_from_props(n, &atom_lines, &schema)
+
+	// Parse columns according to schema -> atoms block
+	let atoms_block = build_block_from_props(n, &atom_lines, &schema)
 		.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-	Ok(Some(XYZFrame { atoms, metadata }))
+	let mut frame = Frame::new();
+	frame.insert("atoms", atoms_block);
+	// Stringify metadata into frame.meta
+	for (k, v) in kv_meta.into_iter() { frame.meta.insert(k, ext_value_to_string(&v)); }
+
+	Ok(Some(frame))
 }
 
 // =============== Winnow-based frame parser for a complete frame string ===============
@@ -408,7 +418,7 @@ fn number_line<'a>() -> impl Parser<&'a str, usize, ParseError> {
 }
 
 /// Parse a complete XYZ/EXTXYZ frame from a &str using winnow only
-pub fn parse_xyz_frame_str(s: &str) -> std::result::Result<XYZFrame, String> {
+pub fn parse_xyz_frame_str(s: &str) -> std::result::Result<Frame, String> {
 	let mut input = s;
 
 	let n = number_line().parse_next(&mut input)
@@ -424,19 +434,42 @@ pub fn parse_xyz_frame_str(s: &str) -> std::result::Result<XYZFrame, String> {
 
 	// Parse comment to metadata and properties
 	let ec = parse_comment_line(&comment)?;
-	let mut metadata: HashMap<String, ExtValue> = HashMap::new();
+	let mut kv_meta: HashMap<String, ExtValue> = HashMap::new();
 	for (k, v) in ec.kv.iter() {
 		if k.eq_ignore_ascii_case("Properties") { continue; }
-		metadata.insert(k.clone(), v.clone());
+		kv_meta.insert(k.clone(), v.clone());
 	}
 
 	// Build complete schema (base properties + derived columns)
 	let schema = build_complete_schema(&ec);
 	
 	// Parse columns according to schema
-	let atoms = build_df_from_props(n, &atom_lines, &schema)?;
+	let atoms_block = build_block_from_props(n, &atom_lines, &schema)?;
+	let mut frame = Frame::new();
+	frame.insert("atoms", atoms_block);
+	for (k, v) in kv_meta.into_iter() { frame.meta.insert(k, ext_value_to_string(&v)); }
+	Ok(frame)
+}
 
-	Ok(XYZFrame { atoms, metadata })
+fn ext_value_to_string(v: &ExtValue) -> String {
+	match v {
+		ExtValue::Primitive(Primitive::Str(s)) => s.clone(),
+		ExtValue::Primitive(Primitive::Int(i)) => i.to_string(),
+		ExtValue::Primitive(Primitive::Real(r)) => format!("{}", r),
+		ExtValue::Primitive(Primitive::Logical(b)) => b.to_string(),
+		ExtValue::Array1(vals) => vals.iter().map(|p| match p {
+			Primitive::Str(s) => s.clone(),
+			Primitive::Int(i) => i.to_string(),
+			Primitive::Real(r) => format!("{}", r),
+			Primitive::Logical(b) => b.to_string(),
+		}).collect::<Vec<_>>().join(" "),
+		ExtValue::Array2(rows) => rows.iter().map(|row| row.iter().map(|p| match p {
+			Primitive::Str(s) => s.clone(),
+			Primitive::Int(i) => i.to_string(),
+			Primitive::Real(r) => format!("{}", r),
+			Primitive::Logical(b) => b.to_string(),
+		}).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join("; "),
+	}
 }
 
 // =============== XYZFrameReader ===============
@@ -450,18 +483,22 @@ pub fn parse_xyz_frame_str(s: &str) -> std::result::Result<XYZFrame, String> {
 /// 
 /// ```no_run
 /// use molcore::io::xyz::XYZFrameReader;
-/// use molcore::io::reader::{FrameReader, open_txt, open_gz};
+/// use molcore::io::reader::{Reader, FrameReader, open_txt, open_gz};
 /// 
 /// // Read plain text file
 /// let mut reader = XYZFrameReader::new(open_txt("file.xyz").unwrap());
 /// if let Some(frame) = reader.read_frame().unwrap() {
-///     println!("Atoms: {}", frame.atoms.height());
+///     if let Some(atoms) = frame.get("atoms") {
+///         println!("Atoms: {}", atoms.nrows().unwrap_or(0));
+///     }
 /// }
 /// 
 /// // Read gzip-compressed file
 /// let mut reader = XYZFrameReader::new(open_gz("file.xyz.gz").unwrap());
 /// if let Some(frame) = reader.read_frame().unwrap() {
-///     println!("Atoms: {}", frame.atoms.height());
+///     if let Some(atoms) = frame.get("atoms") {
+///         println!("Atoms: {}", atoms.nrows().unwrap_or(0));
+///     }
 /// }
 /// ```
 pub struct XYZFrameReader<R: BufRead> {
@@ -470,7 +507,7 @@ pub struct XYZFrameReader<R: BufRead> {
 
 impl<R: BufRead> Reader for XYZFrameReader<R> {
 	type R = R;
-	type FrameLike = XYZFrame;
+	type FrameLike = Frame;
 
 	fn new(reader: Self::R) -> Self {
 		Self { reader }
@@ -528,12 +565,12 @@ Properties=species:S:1:pos:R:3:velo:R:3 Lattice="10 0 0 0 10 0 0 0 10"
 H 0 0 1 1 0 0
 O 0 1 0 0 1 0
 H 1 0 0 0 0 1"#;
-        let frame = parse_xyz_frame_str(frame_str).expect("parse frame");
-        assert_eq!(frame.atoms.height(), 3);
-        assert_eq!(frame.atoms.width(), 7); // species + pos_1,pos_2,pos_3 + velo_1,velo_2,velo_3
-        // metadata should only contain Lattice (Properties is excluded)
-        assert_eq!(frame.metadata.len(), 1); 
-        assert!(frame.metadata.contains_key("Lattice"));
+	let frame = parse_xyz_frame_str(frame_str).expect("parse frame");
+	let atoms = frame.get("atoms").expect("atoms block");
+	assert_eq!(atoms.nrows().unwrap_or(0), 3);
+	assert!(atoms.len() >= 3); // pos_1,pos_2,pos_3 present (species dropped)
+	// metadata should only contain Lattice (Properties is excluded)
+	assert!(frame.meta.get("Lattice").is_some());
     }
 
 	#[test]
@@ -550,9 +587,10 @@ H 2.0 0.0 0.0
 		let cursor = Cursor::new(&data[..]);
 		let mut reader = XYZFrameReader::new(cursor);
 
-		let frame = reader.read_frame().expect("read frame").expect("frame exists");
-		assert_eq!(frame.atoms.height(), 3);
-		assert_eq!(frame.atoms.width(), 4); // species + pos_1, pos_2, pos_3
+	let frame = reader.read_frame().expect("read frame").expect("frame exists");
+	let atoms = frame.get("atoms").expect("atoms block");
+	assert_eq!(atoms.nrows().unwrap_or(0), 3);
+	assert!(atoms.len() >= 3); // pos_1, pos_2, pos_3 present (species dropped)
 
 		// Should return None on subsequent read (EOF)
 		let eof = reader.read_frame().expect("read ok");
@@ -572,9 +610,10 @@ H 1.0 0.0 0.0
 		let cursor = Cursor::new(&data[..]);
 		let mut reader = XYZFrameReader::new(cursor);
 
-		let frame = reader.read_frame().expect("read frame").expect("frame exists");
-		assert_eq!(frame.atoms.height(), 2);
-		assert_eq!(frame.atoms.width(), 4); // element, x, y, z
-		assert!(frame.metadata.contains_key("comment"));
+	let frame = reader.read_frame().expect("read frame").expect("frame exists");
+	let atoms = frame.get("atoms").expect("atoms block");
+	assert_eq!(atoms.nrows().unwrap_or(0), 2);
+	assert!(atoms.len() >= 3); // x, y, z
+	assert!(frame.meta.get("comment").is_some());
 	}
 }

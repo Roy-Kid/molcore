@@ -1,3 +1,17 @@
+[workspace]
+members = [
+	".",
+	"python",
+	"wasm",
+]
+
+[workspace.package]
+edition = "2024"
+license = "BSD-3-Clause"
+authors = ["MolCrafts"]
+repository = "https://github.com/MolCrafts/molcore"
+homepage = "https://github.com/MolCrafts/molcore"
+
 [package]
 name = "molcore"
 version = "0.1.0"
@@ -13,7 +27,5 @@ license = "BSD-3-Clause"
 slow-tests = []
 
 [dependencies]
-nalgebra = { version = "0.34.1" }
 flate2 = { version = "1.0", features = ["rust_backend" ] }
-polars = { version = "0.51.0", default-features = false, features = ["fmt"] }
 winnow = { version = "0.7.13" }

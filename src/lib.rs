@@ -14,12 +14,12 @@
 //! use molcore::core::Element;
 //!
 //! // Look up elements by atomic number
-//! let hydrogen = Element::by_number(1);
-//! assert_eq!(hydrogen.symbol, "H");
+//! let hydrogen = Element::by_number(1).unwrap();
+//! assert_eq!(hydrogen.symbol(), "H");
 //!
 //! // Or by symbol (case-insensitive)
-//! let h = Element::by_symbol("h");
-//! assert_eq!(h.name, "Hydrogen");
+//! let h = Element::by_symbol("h").unwrap();
+//! assert_eq!(h.name(), "Hydrogen");
 //! ```
 
 #![warn(missing_docs)]

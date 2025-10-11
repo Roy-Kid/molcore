@@ -1,7 +1,8 @@
+use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 
 use super::dtype::{DType, HasDType};
-use super::trait_array::Array;
+use super::base::Array;
 
 /// A minimal n-dimensional array with row-major storage and NumPy-like indexing helpers.
 ///
@@ -12,10 +13,10 @@ use super::trait_array::Array;
 /// # Examples
 ///
 /// ```
-/// use molomni::core::array::{NdArray, Array, DType};
+/// use molcore::core::array::{NdArray, Array, DType};
 ///
 /// // 2x3 array with row-major data
-/// let arr = NdArray::new(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
+/// let arr = NdArray::from_vec(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
 /// assert_eq!(arr.dtype(), DType::Int32);
 /// assert_eq!(arr.shape(), &[2, 3]);
 ///
@@ -27,44 +28,78 @@ use super::trait_array::Array;
 /// // Index trait (panics on OOB), like NumPy IndexError
 /// assert_eq!(arr[[1, 2]], 6);
 /// ```
+/// A simple contiguous N-dimensional array with owned or borrowed backing storage.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Buffer<T> {
+    Owned(Vec<T>),
+    Borrowed(*const T, usize, PhantomData<*const T>), // ptr, len
+}
+
+/// Row-major N-dimensional array with shape and strides. Can wrap owned `Vec<T>` or a borrowed pointer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NdArray<T> {
-    data: Vec<T>,
+    data: Buffer<T>,
     shape: Vec<usize>,
     strides: Vec<usize>, // row-major strides
 }
 
 impl<T> NdArray<T> {
-    /// Creates a new array from `shape` (row-major) and `data`.
-    ///
-    /// # Panics
+    /// Creates a new array with owned row-major data from `shape` and `data`.
     ///
     /// Panics if `data.len()` does not match the product of `shape`.
-    pub fn new(shape: Vec<usize>, data: Vec<T>) -> Self {
+    pub fn from_vec(shape: Vec<usize>, data: Vec<T>) -> Self {
         let expected = shape.iter().product::<usize>();
         assert!(expected == data.len(), "data length {} does not match shape product {}", data.len(), expected);
         let strides = compute_row_major_strides(&shape);
-        Self { data, shape, strides }
+        Self { data: Buffer::Owned(data), shape, strides }
     }
 
-    /// Returns a reference to the underlying data buffer
-    #[inline]
-    pub fn data(&self) -> &Vec<T> { &self.data }
+    /// Temporary back-compat alias for `from_vec`.
+    #[deprecated(note = "use NdArray::from_vec(shape, data) instead of new(shape, data)")]
+    pub fn new(shape: Vec<usize>, data: Vec<T>) -> Self { Self::from_vec(shape, data) }
 
-    /// Returns a mutable reference to the underlying data buffer
+    /// Creates a borrowed view array from a raw pointer and `len` elements.
+    ///
+    /// Safety: caller must guarantee that `ptr..ptr+len` is valid for reads for the
+    /// lifetime of the returned NdArray, and that it matches the given shape/strides.
+    pub unsafe fn from_ptr(shape: Vec<usize>, ptr: *const T, len: usize, strides: Option<Vec<usize>>) -> Self {
+        let expected = shape.iter().product::<usize>();
+        assert!(expected == len, "ptr length {} does not match shape product {}", len, expected);
+        let strides = strides.unwrap_or_else(|| compute_row_major_strides(&shape));
+        Self { data: Buffer::Borrowed(ptr, len, PhantomData), shape, strides }
+    }
+
+    /// Returns a shared slice view to the underlying contiguous buffer
     #[inline]
-    pub fn data_mut(&mut self) -> &mut Vec<T> { &mut self.data }
+    pub fn data(&self) -> &[T] {
+        match &self.data {
+            Buffer::Owned(v) => v.as_slice(),
+            Buffer::Borrowed(ptr, len, _) => unsafe { core::slice::from_raw_parts(*ptr, *len) },
+        }
+    }
+
+    /// Returns a mutable slice if the array owns its buffer; None for borrowed arrays
+    #[inline]
+    pub fn data_mut(&mut self) -> Option<&mut [T]> {
+        match &mut self.data {
+            Buffer::Owned(v) => Some(v.as_mut_slice()),
+            Buffer::Borrowed(_, _, _) => None,
+        }
+    }
 
     /// Safe element access by n-dimensional index; returns `None` if out of bounds.
     #[inline]
     pub fn get(&self, idx: &[usize]) -> Option<&T> {
-        self.offset_of(idx).map(|o| &self.data[o])
+    self.offset_of(idx).map(|o| &self.data()[o])
     }
 
     /// Safe mutable element access by n-dimensional index; returns `None` if out of bounds.
     #[inline]
     pub fn get_mut(&mut self, idx: &[usize]) -> Option<&mut T> {
-        self.offset_of(idx).map(|o| &mut self.data[o])
+        match self.offset_of(idx) {
+            Some(o) => self.data_mut().map(|s| &mut s[o]),
+            None => None,
+        }
     }
 
     /// Computes the flat offset for an n-dimensional index if in bounds.
@@ -80,22 +115,32 @@ impl<T> NdArray<T> {
     }
 }
 
-impl<T: HasDType + Send + Sync> Array for NdArray<T> {
+impl<T: HasDType + Send + Sync + 'static> Array for NdArray<T> {
     #[inline]
     fn dtype(&self) -> DType { T::dtype() }
 
     #[inline]
     fn shape(&self) -> &[usize] { &self.shape }
+
+    #[inline]
+    fn as_any(&self) -> &dyn core::any::Any { self }
 }
 
 impl<T> NdArray<T> {
     /// Convert the array to another element type using `From<T>` for each element.
     pub fn astype<U>(self) -> NdArray<U>
     where
+        T: Clone,
         U: From<T>,
     {
-        let data = self.data.into_iter().map(U::from).collect::<Vec<U>>();
-        NdArray::new(self.shape, data)
+        let data: Vec<U> = match self.data {
+            Buffer::Owned(v) => v.into_iter().map(U::from).collect(),
+            Buffer::Borrowed(ptr, len, _) => {
+                let s = unsafe { core::slice::from_raw_parts(ptr, len) };
+                s.iter().map(|x| U::from(x.clone())).collect()
+            }
+        };
+        NdArray::from_vec(self.shape, data)
     }
 
     /// Stack a list of equally-shaped arrays along a new leading axis.
@@ -103,10 +148,13 @@ impl<T> NdArray<T> {
     /// Given children each with shape `[d0, d1, ...]`, returns an array with shape
     /// `[n, d0, d1, ...]` where `n = children.len()`, with row-major concatenation order.
     /// Returns `Err` if shapes are ragged (not all equal).
-    pub fn stack(children: Vec<NdArray<T>>) -> Result<NdArray<T>, &'static str> {
+    pub fn stack(children: Vec<NdArray<T>>) -> Result<NdArray<T>, &'static str>
+    where
+        T: Clone,
+    {
         // Handle empty children: produce a 1D empty array with shape [0]
         if children.is_empty() {
-            return Ok(NdArray::new(vec![0], Vec::new()));
+            return Ok(NdArray::from_vec(vec![0], Vec::new()));
         }
 
         let n = children.len();
@@ -124,10 +172,10 @@ impl<T> NdArray<T> {
 
         // Move data out in order
         let mut data = Vec::with_capacity(total);
-        for mut c in children.into_iter() {
-            // Ensure strides don't affect layout; data is already contiguous row-major
-            debug_assert_eq!(c.shape.iter().product::<usize>(), c.data.len());
-            data.append(&mut c.data);
+        for c in children.into_iter() {
+            let s = c.data();
+            debug_assert_eq!(c.shape.iter().product::<usize>(), s.len());
+            data.extend(s.iter().cloned());
         }
 
         // New shape is [n, ..first_shape]
@@ -135,7 +183,7 @@ impl<T> NdArray<T> {
         new_shape.push(n);
         new_shape.extend(first_shape);
 
-        Ok(NdArray::new(new_shape, data))
+        Ok(NdArray::from_vec(new_shape, data))
     }
 }
 
@@ -151,7 +199,7 @@ impl NdArray<i32> {
         } else {
             while v > stop { data.push(v); v = v.saturating_add(step); }
         }
-        NdArray::new(vec![data.len()], data)
+    NdArray::from_vec(vec![data.len()], data)
     }
 
     /// NumPy-like arange that defaults to integer array
@@ -172,7 +220,7 @@ impl NdArray<f64> {
         } else {
             while v > stop { data.push(v); v += step; }
         }
-        NdArray::new(vec![data.len()], data)
+    NdArray::from_vec(vec![data.len()], data)
     }
 }
 
@@ -181,29 +229,29 @@ impl<T> Index<[usize; 1]> for NdArray<T> {
     type Output = T;
     fn index(&self, index: [usize; 1]) -> &Self::Output {
         let o = self.offset_of(&index).expect("index out of bounds or wrong rank for [usize;1]");
-        &self.data[o]
+        &self.data()[o]
     }
 }
 
 impl<T> IndexMut<[usize; 1]> for NdArray<T> {
     fn index_mut(&mut self, index: [usize; 1]) -> &mut Self::Output {
         let o = self.offset_of(&index).expect("index out of bounds or wrong rank for [usize;1]");
-        &mut self.data[o]
-    }
+        self.data_mut().and_then(|s| s.get_mut(o)).expect("borrowed array is not mutable or index OOB")
+}
 }
 
 impl<T> Index<[usize; 2]> for NdArray<T> {
     type Output = T;
     fn index(&self, index: [usize; 2]) -> &Self::Output {
         let o = self.offset_of(&index).expect("index out of bounds or wrong rank for [usize;2]");
-        &self.data[o]
+        &self.data()[o]
     }
 }
 
 impl<T> IndexMut<[usize; 2]> for NdArray<T> {
     fn index_mut(&mut self, index: [usize; 2]) -> &mut Self::Output {
         let o = self.offset_of(&index).expect("index out of bounds or wrong rank for [usize;2]");
-        &mut self.data[o]
+        self.data_mut().and_then(|s| s.get_mut(o)).expect("borrowed array is not mutable or index OOB")
     }
 }
 
@@ -211,14 +259,14 @@ impl<T> Index<[usize; 3]> for NdArray<T> {
     type Output = T;
     fn index(&self, index: [usize; 3]) -> &Self::Output {
         let o = self.offset_of(&index).expect("index out of bounds or wrong rank for [usize;3]");
-        &self.data[o]
+        &self.data()[o]
     }
 }
 
 impl<T> IndexMut<[usize; 3]> for NdArray<T> {
     fn index_mut(&mut self, index: [usize; 3]) -> &mut Self::Output {
         let o = self.offset_of(&index).expect("index out of bounds or wrong rank for [usize;3]");
-        &mut self.data[o]
+        self.data_mut().and_then(|s| s.get_mut(o)).expect("borrowed array is not mutable or index OOB")
     }
 }
 
@@ -234,3 +282,9 @@ fn compute_row_major_strides(shape: &[usize]) -> Vec<usize> {
     }
     strides
 }
+
+// Safety: NdArray only provides shared access for borrowed buffers and optional mutable
+// access only when it owns the buffer. The raw pointer in Borrowed variant is read-only
+// and used to create shared slices. We assert it's Send + Sync when T is Send + Sync.
+unsafe impl<T: Send + Sync> Send for NdArray<T> {}
+unsafe impl<T: Send + Sync> Sync for NdArray<T> {}

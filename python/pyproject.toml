@@ -1,32 +1,14 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "molrs"
 version = "0.1.0"
-description = "Python bindings for molcore - Molecular modeling core library"
-authors = [
-    { name = "MolCrafts", email = "molcrafts@example.com" }
-]
+description = "Python bindings for molcore"
+authors = [{ name = "MolCrafts" }]
 requires-python = ">=3.8"
-classifiers = [
-    "Programming Language :: Rust",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
-    "License :: OSI Approved :: BSD License",
-]
-dependencies = [
-    "numpy>=1.20.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "maturin>=1.0",
-]
 
 [tool.maturin]
-python-source = "src"
-module-name = "molrs._molrs"
 features = ["pyo3/extension-module"]
+
