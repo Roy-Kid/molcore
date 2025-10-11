@@ -1,12 +1,19 @@
 [package]
-name = "molomni"
+name = "molcore"
 version = "0.1.0"
 edition = "2024"
 authors = ["MolCrafts"]
-description = "MolCrafts molecular modeling core library (molomni)"
-homepage = "https://github.com/MolCrafts/molomni"
-repository = "https://github.com/MolCrafts/molomni"
+description = "MolCrafts molecular modeling core library (molcore)"
+homepage = "https://github.com/MolCrafts/molcore"
+repository = "https://github.com/MolCrafts/molcore"
 license = "BSD-3-Clause"
 
+[features]
+# Slow and comprehensive integration tests (requires test data to be downloaded)
+slow-tests = []
+
 [dependencies]
-polars = { version = "x", features = ["lazy"] }
+nalgebra = { version = "0.34.1" }
+flate2 = { version = "1.0", features = ["rust_backend" ] }
+polars = { version = "0.51.0", default-features = false, features = ["fmt"] }
+winnow = { version = "0.7.13" }

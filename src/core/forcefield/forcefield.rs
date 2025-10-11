@@ -13,7 +13,7 @@ use super::components::{AtomStyle, AtomType, BondStyle, BondType};
 /// # Examples
 ///
 /// ```
-/// use molomni::core::forcefield::{ForceField, Symbol, Mass, Charge};
+/// use molcore::core::forcefield::{ForceField, Symbol, Mass, Charge};
 ///
 /// let mut ff = ForceField::new();
 ///
@@ -60,7 +60,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");
@@ -76,7 +76,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");
@@ -96,7 +96,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::{ForceField, Mass, Charge};
+    /// use molcore::core::forcefield::{ForceField, Mass, Charge};
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");
@@ -114,7 +114,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::{ForceField, Mass};
+    /// use molcore::core::forcefield::{ForceField, Mass};
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");
@@ -140,7 +140,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::{ForceField, Mass};
+    /// use molcore::core::forcefield::{ForceField, Mass};
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");
@@ -167,7 +167,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::{ForceField, SpringConstant};
+    /// use molcore::core::forcefield::{ForceField, SpringConstant};
     ///
     /// let mut ff = ForceField::new();
     /// let atom_style = ff.create_style("full");
@@ -193,7 +193,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let style1 = ff.create_style("full");
@@ -219,7 +219,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");
@@ -240,7 +240,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// ff.create_style("full");
@@ -261,7 +261,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");
@@ -281,7 +281,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");
@@ -305,7 +305,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let bond_style = ff.create_bond_style("harmonic");
@@ -323,7 +323,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let atom_style = ff.create_style("full");
@@ -356,7 +356,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let atom_style = ff.create_style("full");
@@ -386,7 +386,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let atom_style = ff.create_style("full");
@@ -411,7 +411,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// ff.create_bond_style("harmonic");
@@ -440,7 +440,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let atom_style = ff.create_style("full");
@@ -469,7 +469,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let atom_style = ff.create_style("full");
@@ -499,7 +499,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::ForceField;
+    /// use molcore::core::forcefield::ForceField;
     ///
     /// let mut ff = ForceField::new();
     /// let atom_style = ff.create_style("full");
@@ -530,7 +530,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::{ForceField, Symbol, Mass};
+    /// use molcore::core::forcefield::{ForceField, Symbol, Mass};
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");
@@ -556,7 +556,7 @@ impl ForceField {
     /// # Examples
     ///
     /// ```
-    /// use molomni::core::forcefield::{ForceField, Mass};
+    /// use molcore::core::forcefield::{ForceField, Mass};
     ///
     /// let mut ff = ForceField::new();
     /// let style = ff.create_style("full");

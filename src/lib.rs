@@ -1,4 +1,4 @@
-//! # molomni
+//! # molcore
 //!
 //! A Rust library providing core molecular modeling functionality.
 //!
@@ -11,7 +11,7 @@
 //! ## Examples
 //!
 //! ```
-//! use molomni::core::Element;
+//! use molcore::core::Element;
 //!
 //! // Look up elements by atomic number
 //! let hydrogen = Element::by_number(1);
@@ -26,3 +26,4 @@
 #![warn(rustdoc::missing_crate_level_docs)]
 
 pub mod core;
+pub mod io;

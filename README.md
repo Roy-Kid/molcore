@@ -1,8 +1,23 @@
-# molomni
+# molcore
 
-[![Crates.io](https://img.shields.io/crates/v/molomni.svg)](https://crates.io/crates/molomni)
-[![Documentation](https://docs.rs/molomni/badge.svg)](https://docs.rs/molomni)
+[![Crates.io](https://img.shields.io/crates/v/molcore.svg)](https://crates.io/crates/molcore)
+[![Documentation](https://docs.rs/molcore/badge.svg)](https://docs.rs/molcore)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+
+## Quick Start
+
+### Testing
+
+```bash
+# Run fast unit tests
+cargo test
+
+# Run comprehensive integration tests (requires test data)
+./scripts/fetch_testcases.sh
+cargo test --features slow-tests
+```
+
+For more details, see [TESTING.md](TESTING.md).
 
 ## todo list
 - [ ] Frame and Block: static data structures for aligned array
@@ -26,7 +41,7 @@ python3 python/scripts/generate-declarations.py
 - Build the C FFI shared library:
 
 ```bash
-cargo build -p molomni-c --release
+cargo build -p molcore-c --release
 ```
 
 - Try the Vec3 helpers in Python:

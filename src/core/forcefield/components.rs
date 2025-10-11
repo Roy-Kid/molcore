@@ -9,8 +9,8 @@ use crate::core::ecs::Entity;
 /// # Examples
 ///
 /// ```
-/// use molomni::core::ecs::World;
-/// use molomni::core::forcefield::AtomStyle;
+/// use molcore::core::ecs::World;
+/// use molcore::core::forcefield::AtomStyle;
 ///
 /// let mut world = World::new();
 /// let style = world.spawn();
@@ -30,8 +30,8 @@ pub struct AtomStyle {
 /// # Examples
 ///
 /// ```
-/// use molomni::core::ecs::World;
-/// use molomni::core::forcefield::{AtomStyle, AtomType, Symbol, Mass};
+/// use molcore::core::ecs::World;
+/// use molcore::core::forcefield::{AtomStyle, AtomType, Symbol, Mass};
 ///
 /// let mut world = World::new();
 /// let style = world.spawn();
@@ -58,7 +58,7 @@ pub struct AtomType {
 /// # Examples
 ///
 /// ```
-/// use molomni::core::forcefield::Symbol;
+/// use molcore::core::forcefield::Symbol;
 ///
 /// let carbon = Symbol("C".into());
 /// let lithium = Symbol("Li".into());
@@ -71,7 +71,7 @@ pub struct Symbol(pub String);
 /// # Examples
 ///
 /// ```
-/// use molomni::core::forcefield::Alias;
+/// use molcore::core::forcefield::Alias;
 ///
 /// let alias = Alias("Lithium ion".into());
 /// ```
@@ -83,7 +83,7 @@ pub struct Alias(pub String);
 /// # Examples
 ///
 /// ```
-/// use molomni::core::forcefield::Charge;
+/// use molcore::core::forcefield::Charge;
 ///
 /// let cation = Charge(1.0);
 /// let anion = Charge(-1.0);
@@ -97,7 +97,7 @@ pub struct Charge(pub f64);
 /// # Examples
 ///
 /// ```
-/// use molomni::core::forcefield::Mass;
+/// use molcore::core::forcefield::Mass;
 ///
 /// let carbon = Mass(12.011);
 /// let hydrogen = Mass(1.008);
@@ -112,8 +112,8 @@ pub struct Mass(pub f64);
 /// # Examples
 ///
 /// ```
-/// use molomni::core::ecs::World;
-/// use molomni::core::forcefield::BondStyle;
+/// use molcore::core::ecs::World;
+/// use molcore::core::forcefield::BondStyle;
 ///
 /// let mut world = World::new();
 /// let style = world.spawn();
@@ -135,7 +135,7 @@ pub struct BondStyle {
 /// # Examples
 ///
 /// ```
-/// use molomni::core::forcefield::{ForceField, BondStyle, BondType};
+/// use molcore::core::forcefield::{ForceField, BondStyle, BondType};
 ///
 /// let mut ff = ForceField::new();
 /// let atom_style = ff.create_style("full");
@@ -167,7 +167,7 @@ pub struct BondType {
 /// # Examples
 ///
 /// ```
-/// use molomni::core::forcefield::SpringConstant;
+/// use molcore::core::forcefield::SpringConstant;
 ///
 /// let k = SpringConstant(340.0); // kcal/mol/Å²
 /// ```
@@ -179,7 +179,7 @@ pub struct SpringConstant(pub f64);
 /// # Examples
 ///
 /// ```
-/// use molomni::core::forcefield::EquilibriumLength;
+/// use molcore::core::forcefield::EquilibriumLength;
 ///
 /// let r0 = EquilibriumLength(1.09); // Å
 /// ```

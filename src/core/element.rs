@@ -1,95 +1,90 @@
-//! Element data and lookup functionality.
+use core::str::FromStr;
 
-/// Represents a chemical element with its fundamental properties.
-///
-/// # Examples
-///
-/// ```
-/// use molomni::core::Element;
-///
-/// let hydrogen = Element::by_number(1);
-/// assert_eq!(hydrogen.symbol, "H");
-/// assert_eq!(hydrogen.name, "Hydrogen");
-/// ```
-#[derive(Clone, Copy, Debug)]
-pub struct Element {
-    /// Atomic number (number of protons)
-    pub z: u8,
-    /// Chemical symbol (e.g., "H", "He", "Li")
-    pub symbol: &'static str,
-    /// Full element name (e.g., "Hydrogen")
-    pub name: &'static str,
-    /// Atomic mass in unified atomic mass units (u)
-    pub atomic_mass: f32,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Element {
+    H,
+    // He,
+    // Li,
+    // ...
 }
 
 impl Element {
-    /// Finds an element by its atomic number.
-    ///
-    /// # Arguments
-    ///
-    /// * `z` - The atomic number to search for
-    ///
-    /// # Returns
-    ///
-    /// A static reference to the `Element` with the given atomic number.
-    ///
-    /// # Panics
-    ///
-    /// Panics with "invalid atomic number" if no element with the given atomic number exists.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use molomni::core::Element;
-    ///
-    /// let hydrogen = Element::by_number(1);
-    /// assert_eq!(hydrogen.symbol, "H");
-    /// ```
-    pub fn by_number(z: u8) -> &'static Element {
-        ELEMENTS
-            .iter()
-            .find(|e| e.z == z)
-            .expect("invalid atomic number")
+    pub const fn z(self) -> u8 {
+        match self {
+            Element::H => 1,
+        }
     }
 
-    /// Finds an element by its chemical symbol (case-insensitive).
-    ///
-    /// # Arguments
-    ///
-    /// * `sym` - The chemical symbol to search for (e.g., "H", "h", "He")
-    ///
-    /// # Returns
-    ///
-    /// A static reference to the `Element` with the given symbol.
-    ///
-    /// # Panics
-    ///
-    /// Panics with "invalid symbol" if no element with the given symbol exists.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use molomni::core::Element;
-    ///
-    /// let h1 = Element::by_symbol("H");
-    /// let h2 = Element::by_symbol("h");
-    /// assert_eq!(h1 as *const _, h2 as *const _); // Same element
-    /// ```
-    pub fn by_symbol(sym: &str) -> &'static Element {
-        ELEMENTS
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Element::H => "H",
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Element::H => "Hydrogen",
+        }
+    }
+
+    pub const fn atomic_mass(self) -> f32 {
+        match self {
+            Element::H => 1.008,
+        }
+    }
+
+    pub const ALL: &'static [Element] = &[
+        Element::H,
+    ];
+
+    pub fn by_number(z: u8) -> Option<Element> {
+        Self::ALL.iter().copied().find(|e| e.z() == z)
+    }
+
+    pub fn by_symbol(sym: &str) -> Option<Element> {
+        let s = sym.as_bytes();
+        Self::ALL
             .iter()
-            .find(|e| e.symbol.eq_ignore_ascii_case(sym))
-            .expect("invalid symbol")
+            .copied()
+            .find(|e| e.symbol().eq_ignore_ascii_case(sym))
     }
 }
 
-/// Static array containing all known chemical elements.
-///
-/// Currently contains only a subset of elements. More will be added in future versions.
-pub static ELEMENTS: &[Element] = &[Element {
-    z: 1,
-    symbol: "H",
-    name: "Hydrogen",
-    atomic_mass: 1.008,
-}];
+impl FromStr for Element {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Element::by_symbol(s).ok_or(())
+    }
+}
+
+impl core::fmt::Display for Element {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.symbol())
+    }
+}
+
+#[cfg(test)]
+mod test_element {
+
+    use super::*;
+
+    #[test]
+    fn test_accessors() {
+        assert_eq!(Element::by_number(1), Some(Element::H));
+        assert_eq!(Element::by_symbol("H"), Some(Element::H));
+        assert_eq!(Element::by_symbol("h"), Some(Element::H));
+        assert_eq!(Element::by_symbol("X"), None);
+
+    }
+
+    #[test]
+    fn test_props() {
+        let e = Element::H;
+        assert_eq!(e.z(), 1);
+        assert_eq!(e.symbol(), "H");
+        assert_eq!(e.name(), "Hydrogen");
+        assert_eq!(e.atomic_mass(), 1.008);
+        assert_eq!(format!("{}", e), "H");
+    }
+
+}

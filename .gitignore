@@ -33,3 +33,6 @@ target
 #/target
 
 build/
+
+# Test data (downloaded via scripts/fetch_testcases.sh)
+tests/tests-data/

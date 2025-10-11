@@ -1,0 +1,20 @@
+[package]
+name = "molrs"
+version = "0.1.0"
+edition = "2021"
+authors = ["MolCrafts"]
+description = "Python bindings for molcore - Molecular modeling core library"
+homepage = "https://github.com/MolCrafts/molcore"
+repository = "https://github.com/MolCrafts/molcore"
+license = "BSD-3-Clause"
+
+[lib]
+name = "molrs"
+crate-type = ["cdylib"]
+
+[dependencies]
+molcore = { path = ".." }
+pyo3 = { version = "0.22", features = ["extension-module"] }
+numpy = "0.22"
+nalgebra = "0.34.1"
+polars = "0.51.0"
