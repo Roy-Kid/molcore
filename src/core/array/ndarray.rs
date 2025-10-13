@@ -126,6 +126,21 @@ impl<T: HasDType + Send + Sync + 'static> Array for NdArray<T> {
     fn as_any(&self) -> &dyn core::any::Any { self }
 }
 
+// Public inherent helpers so callers don't need to import the `Array` trait.
+impl<T: HasDType> NdArray<T> {
+    /// Public accessor for the dtype of the array's element type.
+    #[inline]
+    pub fn dtype(&self) -> DType {
+        T::dtype()
+    }
+
+    /// Public accessor for the array shape (slice of dimensions).
+    #[inline]
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+}
+
 impl<T> NdArray<T> {
     /// Convert the array to another element type using `From<T>` for each element.
     pub fn astype<U>(self) -> NdArray<U>

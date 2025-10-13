@@ -1,9 +1,5 @@
 [workspace]
-members = [
-	".",
-	"python",
-	"wasm",
-]
+members = [".", "python", "wasm"]
 
 [workspace.package]
 edition = "2024"
@@ -23,9 +19,8 @@ repository = "https://github.com/MolCrafts/molcore"
 license = "BSD-3-Clause"
 
 [features]
-# Slow and comprehensive integration tests (requires test data to be downloaded)
 slow-tests = []
 
 [dependencies]
-flate2 = { version = "1.0", features = ["rust_backend" ] }
+flate2 = { version = "1.0", features = ["rust_backend"] }
 winnow = { version = "0.7.13" }

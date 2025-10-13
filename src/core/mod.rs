@@ -14,3 +14,6 @@ pub mod block;
 
 /// Top-level container mapping names to blocks, with frame-level metadata
 pub mod frame;
+
+#[cfg(feature = "polars")]
+pub mod ext_polars;
