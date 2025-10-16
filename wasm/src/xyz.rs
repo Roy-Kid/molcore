@@ -1,19 +1,7 @@
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
+use ndarray::{s, Array1};
 use molcore::io::xyz::parse_xyz_frame_str;
-use molcore::core::region::r#box::Box as CoreBox;
-use molcore::core::topology::{Topology as CoreTopology, TopoError as CoreTopoError};
-use molcore::core::universe::Universe as CoreUniverse;
-use molcore::core::ecs::Entity as CoreEntity;
-use ndarray::{Array2, s, Array1};
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
-
-// ===== XYZ parser binding =====
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsBlock {
@@ -41,14 +29,12 @@ pub fn parse_xyz_frame(s: &str) -> Result<JsValue, JsValue> {
     for (name, arr) in atoms.iter() {
         let shape = arr.shape();
         if shape.len() == 2 && shape[0] == nrows && shape[1] == 1 {
-            // Nx1 column, extract as f32
             let a2 = arr.view().into_dimensionality::<ndarray::Ix2>()
                 .map_err(|_| JsValue::from_str("expected 2D array"))?;
             let col: Array1<f32> = a2.slice(s![.., 0]).to_owned().into_dimensionality::<ndarray::Ix1>().unwrap();
             columns.push(name.to_string());
             data.push(col.to_vec());
         } else if shape.len() == 2 && shape[0] == nrows && shape[1] > 1 {
-            // split each column as separate output columns: name_0, name_1, ...
             let a2 = arr.view().into_dimensionality::<ndarray::Ix2>()
                 .map_err(|_| JsValue::from_str("expected 2D array"))?;
             for j in 0..shape[1] {
@@ -56,28 +42,9 @@ pub fn parse_xyz_frame(s: &str) -> Result<JsValue, JsValue> {
                 columns.push(format!("{}_{j}", name));
                 data.push(col.to_vec());
             }
-        } else {
-            // unsupported shape for now; skip
         }
     }
 
     let js = JsFrame { meta: frame.meta, atoms: JsBlock { nrows, columns, data } };
     serde_wasm_bindgen::to_value(&js).map_err(|e| JsValue::from_str(&e.to_string()))
 }
-
-// ===== Minimal ndarray-like view for f32 backed by wasm memory =====
-
-mod xyz;
-mod entity;
-mod view;
-mod r#box;
-mod topology;
-mod universe;
-
-pub use xyz::*;
-pub use entity::*;
-pub use view::*;
-pub use r#box::*;
-pub use topology::*;
-pub use universe::*;
-        F32View { data: vec![0.0; n], shape: shape_vec }

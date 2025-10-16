@@ -9,8 +9,7 @@
 //! - `insert`, `get`, `remove`, `contains_key`, `clear`, and basic iterators
 
 use std::collections::HashMap;
-
-use super::array::Array;
+use ndarray::ArrayD;
 
 /// Errors that can occur when manipulating a [`Block`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,14 +43,14 @@ impl core::fmt::Display for BlockError {
     }
 }
 
-/// A dictionary from string keys to heterogeneous arrays with a consistent axis-0 length.
+/// A dictionary from string keys to ndarray arrays with a consistent axis-0 length.
 #[derive(Default)]
-pub struct Block {
-    map: HashMap<String, Box<dyn Array>>, // heterogeneous arrays via trait objects
-    nrows: Option<usize>,                  // enforced leading dimension, if any
+pub struct Block<T = f32> {
+    map: HashMap<String, ArrayD<T>>, // stored arrays
+    nrows: Option<usize>,            // enforced leading dimension, if any
 }
 
-impl core::fmt::Debug for Block {
+impl<T> core::fmt::Debug for Block<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut map = f.debug_map();
         for (k, v) in &self.map {
@@ -61,7 +60,7 @@ impl core::fmt::Debug for Block {
     }
 }
 
-impl Block {
+impl<T> Block<T> {
     /// Creates an empty Block.
     pub fn new() -> Self { Self { map: HashMap::new(), nrows: None } }
 
@@ -94,20 +93,17 @@ impl Block {
 
     /// Gets an immutable reference to the array for `key` if present.
     #[inline]
-    pub fn get(&self, key: &str) -> Option<&dyn Array> { self.map.get(key).map(|b| b.as_ref()) }
+    pub fn get(&self, key: &str) -> Option<&ArrayD<T>> { self.map.get(key) }
 
     /// Gets a mutable reference to the array for `key` if present.
     #[inline]
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut Box<dyn Array>> { self.map.get_mut(key) }
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut ArrayD<T>> { self.map.get_mut(key) }
 
     /// Inserts an array under `key`, enforcing consistent axis-0 length.
     ///
     /// - Returns `Ok(prev)` where `prev` is the previous value for `key`, if any.
     /// - Returns `Err` if the array has rank 0 or violates the Block's `nrows`.
-    pub fn insert<A>(&mut self, key: impl Into<String>, arr: A) -> Result<Option<Box<dyn Array>>, BlockError>
-    where
-        A: Array + 'static,
-    {
+    pub fn insert(&mut self, key: impl Into<String>, arr: ArrayD<T>) -> Result<Option<ArrayD<T>>, BlockError> {
         let key = key.into();
         let shape = arr.shape();
         if shape.is_empty() { return Err(BlockError::RankZero { key }); }
@@ -117,20 +113,20 @@ impl Block {
             None => {
                 // First insertion defines nrows
                 self.nrows = Some(len0);
-                Ok(self.map.insert(key, Box::new(arr)))
+                Ok(self.map.insert(key, arr))
             }
             Some(expected) => {
                 if len0 != expected {
                     return Err(BlockError::RaggedAxis0 { key, expected, got: len0 });
                 }
-                Ok(self.map.insert(key, Box::new(arr)))
+                Ok(self.map.insert(key, arr))
             }
         }
     }
 
     /// Removes and returns the array for `key`, if present. If the Block becomes
     /// empty after removal, resets `nrows` to `None`.
-    pub fn remove(&mut self, key: &str) -> Option<Box<dyn Array>> {
+    pub fn remove(&mut self, key: &str) -> Option<ArrayD<T>> {
         let out = self.map.remove(key);
         if self.map.is_empty() { self.nrows = None; }
         out
@@ -142,15 +138,15 @@ impl Block {
         self.nrows = None;
     }
 
-    /// Returns an iterator over (&str, &dyn Array).
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &dyn Array)> {
-        self.map.iter().map(|(k, v)| (k.as_str(), v.as_ref() as &dyn Array))
+    /// Returns an iterator over (&str, &ArrayD<T>).
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &ArrayD<T>)> {
+        self.map.iter().map(|(k, v)| (k.as_str(), v))
     }
 
     /// Returns an iterator over keys.
     pub fn keys(&self) -> impl Iterator<Item = &str> { self.map.keys().map(|k| k.as_str()) }
 
     /// Returns an iterator over array references.
-    pub fn values(&self) -> impl Iterator<Item = &dyn Array> { self.map.values().map(|v| v.as_ref()) }
+    pub fn values(&self) -> impl Iterator<Item = &ArrayD<T>> { self.map.values() }
     
 }

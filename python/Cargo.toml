@@ -16,3 +16,4 @@ crate-type = ["cdylib"]
 molcore = { path = ".." }
 pyo3 = { version = "0.22", features = ["extension-module"] }
 numpy = "0.22"
+ndarray = "0.16"

@@ -22,8 +22,9 @@
 //! assert_eq!(h.name(), "Hydrogen");
 //! ```
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![warn(rustdoc::missing_crate_level_docs)]
 
 pub mod core;
 pub mod io;
+pub mod math;

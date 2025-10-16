@@ -1,40 +1,12 @@
-use molcore::core::array::{Array, Mat3, NdArray, Vec3 as Vector3f};
 use molcore::core::region::r#box::Box as RustBox;
-use numpy::{
-    PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods,
-};
+use molcore::core::locality::nblist::linked_cell::LinkedCell as RustLinkedCell;
+use ndarray::{array, Array1};
+use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-/// Helper: Borrow NumPy (N×3) row-major array as NdArray (N×3) of f32 without copying
-#[inline]
-fn numpy_to_ndarray3<'py>(arr: PyReadonlyArray2<'py, f32>) -> PyResult<NdArray<f32>> {
-    let shape = arr.shape();
-    if shape.len() != 2 || shape[1] != 3 {
-        return Err(PyValueError::new_err("expected shape (N,3)"));
-    }
-    // This ensures C-contiguous; returns an error otherwise
-    let slice = arr.as_slice()?;
-    let n = shape[0];
-    let len = slice.len();
-    // Safety: underlying NumPy memory stays alive as long as the Python array lives; we'll use it immediately.
-    let nd = unsafe { NdArray::from_ptr(vec![n, 3], slice.as_ptr(), len, None) };
-    Ok(nd)
-}
-
-/// Helper: Convert NdArray (N×3) to NumPy (N×3) row-major array; fills existing array slice in-place
-#[inline]
-fn ndarray3_to_numpy(arr: &NdArray<f32>, out_slice: &mut [f32]) {
-    let shape = arr.shape();
-    assert!(shape.len() == 2 && shape[1] == 3, "expected (N,3)");
-    let n = shape[0];
-    for i in 0..n {
-        let b = i * 3;
-        out_slice[b + 0] = arr.data()[b + 0];
-        out_slice[b + 1] = arr.data()[b + 1];
-        out_slice[b + 2] = arr.data()[b + 2];
-    }
-}
+// All explicit helper conversion functions removed; we rely directly on rust-numpy's
+// as_array()/to_owned_array() methods for zero-copy views or owned clones.
 
 /// Python wrapper for the Rust Box struct
 #[pyclass(name = "Box")]
@@ -62,29 +34,20 @@ impl PyBox {
         origin: Option<PyReadonlyArray1<f32>>,
         pbc: Option<PyReadonlyArray1<bool>>,
     ) -> PyResult<Self> {
-        let h_shape = h.shape();
-        if h_shape[0] != 3 || h_shape[1] != 3 {
+        let h_view = h.as_array();
+        if h_view.dim() != (3, 3) {
             return Err(PyValueError::new_err("h must be a 3x3 matrix"));
         }
+        let h_matrix = h_view.to_owned();
 
-        let h_slice = h.as_slice()?;
-        if h_slice.len() != 9 {
-            return Err(PyValueError::new_err("h must be 3x3"));
-        }
-        let h_matrix = Mat3::from_rows(
-            [h_slice[0], h_slice[1], h_slice[2]],
-            [h_slice[3], h_slice[4], h_slice[5]],
-            [h_slice[6], h_slice[7], h_slice[8]],
-        );
-
-        let origin_vec = if let Some(o) = origin {
-            let o_slice = o.as_slice()?;
-            if o_slice.len() != 3 {
-                return Err(PyValueError::new_err("origin must have 3 elements"));
+        let origin_vec: Array1<f32> = if let Some(o) = origin {
+            let s = o.as_slice()?;
+            if s.len() != 3 {
+                return Err(PyValueError::new_err("origin must have length 3"));
             }
-            Vector3f::new(o_slice[0], o_slice[1], o_slice[2])
+            array![s[0], s[1], s[2]]
         } else {
-            Vector3f::origin()
+            array![0.0, 0.0, 0.0]
         };
 
         let pbc_array = if let Some(p) = pbc {
@@ -119,16 +82,15 @@ impl PyBox {
         origin: Option<PyReadonlyArray1<f32>>,
         pbc: Option<PyReadonlyArray1<bool>>,
     ) -> PyResult<Self> {
-        let origin_vec = if let Some(o) = origin {
-            let o_slice = o.as_slice()?;
-            if o_slice.len() != 3 {
-                return Err(PyValueError::new_err("origin must have 3 elements"));
+        let origin_vec: Array1<f32> = if let Some(o) = origin {
+            let s = o.as_slice()?;
+            if s.len() != 3 {
+                return Err(PyValueError::new_err("origin must have length 3"));
             }
-            Vector3f::new(o_slice[0], o_slice[1], o_slice[2])
+            array![s[0], s[1], s[2]]
         } else {
-            Vector3f::origin()
+            array![0.0, 0.0, 0.0]
         };
-
         let pbc_array = if let Some(p) = pbc {
             let p_slice = p.as_slice()?;
             if p_slice.len() != 3 {
@@ -161,22 +123,20 @@ impl PyBox {
         origin: Option<PyReadonlyArray1<f32>>,
         pbc: Option<PyReadonlyArray1<bool>>,
     ) -> PyResult<Self> {
-        let lengths_slice = lengths.as_slice()?;
-        if lengths_slice.len() != 3 {
-            return Err(PyValueError::new_err("lengths must have 3 elements"));
+        let lv = lengths.as_slice()?;
+        if lv.len() != 3 {
+            return Err(PyValueError::new_err("lengths must have length 3"));
         }
-        let lengths_vec = Vector3f::new(lengths_slice[0], lengths_slice[1], lengths_slice[2]);
-
-        let origin_vec = if let Some(o) = origin {
-            let o_slice = o.as_slice()?;
-            if o_slice.len() != 3 {
-                return Err(PyValueError::new_err("origin must have 3 elements"));
+        let lengths_vec = array![lv[0], lv[1], lv[2]];
+        let origin_vec: Array1<f32> = if let Some(o) = origin {
+            let s = o.as_slice()?;
+            if s.len() != 3 {
+                return Err(PyValueError::new_err("origin must have length 3"));
             }
-            Vector3f::new(o_slice[0], o_slice[1], o_slice[2])
+            array![s[0], s[1], s[2]]
         } else {
-            Vector3f::origin()
+            array![0.0, 0.0, 0.0]
         };
-
         let pbc_array = if let Some(p) = pbc {
             let p_slice = p.as_slice()?;
             if p_slice.len() != 3 {
@@ -208,7 +168,7 @@ impl PyBox {
     /// -------
     /// vector : ndarray, shape (3,), dtype=float32
     ///     Lattice vector
-    fn lattice_vector<'py>(
+    fn lattice<'py>(
         &self,
         py: Python<'py>,
         index: usize,
@@ -216,8 +176,8 @@ impl PyBox {
         if index >= 3 {
             return Err(PyValueError::new_err("index must be 0, 1, or 2"));
         }
-        let vec = self.inner.lattice_vector(index);
-        Ok(PyArray1::from_vec_bound(py, vec![vec.x, vec.y, vec.z]))
+        let vec = self.inner.lattice(index);
+        Ok(vec.into_pyarray_bound(py))
     }
 
     /// Convert Cartesian coordinates to fractional coordinates
@@ -237,21 +197,12 @@ impl PyBox {
         py: Python<'py>,
         xyz: PyReadonlyArray2<f32>,
     ) -> PyResult<Bound<'py, PyArray2<f32>>> {
-        let shape = xyz.shape();
-        if shape[1] != 3 {
-            return Err(PyValueError::new_err("xyz must have shape (N, 3)"));
+        let view = xyz.as_array();
+        if view.ncols() != 3 {
+            return Err(PyValueError::new_err("expected shape (N,3)"));
         }
-
-        let n = shape[0];
-        // Convert NumPy → NdArray (zero-copy borrowed view)
-        let arr = numpy_to_ndarray3(xyz)?;
-        let frac = self.inner.to_frac_points(&arr);
-        let result = PyArray2::zeros_bound(py, [n, 3], false);
-        unsafe {
-            let out = result.as_slice_mut()?;
-            ndarray3_to_numpy(&frac, out);
-        }
-        Ok(result)
+        let frac = self.inner.to_frac(view);
+        Ok(frac.into_pyarray_bound(py))
     }
 
     /// Convert scaled (fractional) coordinates to Cartesian
@@ -271,21 +222,12 @@ impl PyBox {
         py: Python<'py>,
         xyzs: PyReadonlyArray2<f32>,
     ) -> PyResult<Bound<'py, PyArray2<f32>>> {
-        let shape = xyzs.shape();
-        if shape[1] != 3 {
-            return Err(PyValueError::new_err("xyzs must have shape (N, 3)"));
+        let view = xyzs.as_array();
+        if view.ncols() != 3 {
+            return Err(PyValueError::new_err("expected shape (N,3)"));
         }
-
-        let n = shape[0];
-        // Convert NumPy → NdArray (zero-copy borrowed view)
-        let arr = numpy_to_ndarray3(xyzs)?;
-        let cart = self.inner.to_cart_points(&arr);
-        let result = PyArray2::zeros_bound(py, [n, 3], false);
-        unsafe {
-            let out = result.as_slice_mut()?;
-            ndarray3_to_numpy(&cart, out);
-        }
-        Ok(result)
+        let cart = self.inner.to_cart(view);
+        Ok(cart.into_pyarray_bound(py))
     }
 
     /// Wrap unwrapped coordinates into the primary cell
@@ -305,22 +247,14 @@ impl PyBox {
         py: Python<'py>,
         xyzu: PyReadonlyArray2<f32>,
     ) -> PyResult<Bound<'py, PyArray2<f32>>> {
-        let shape = xyzu.shape();
-        if shape[1] != 3 {
-            return Err(PyValueError::new_err("xyzu must have shape (N, 3)"));
+        let view = xyzu.as_array();
+        if view.ncols() != 3 {
+            return Err(PyValueError::new_err("expected shape (N,3)"));
         }
-
-        let n = shape[0];
-        // Convert NumPy → NdArray (zero-copy borrowed view)
-        let arr = numpy_to_ndarray3(xyzu)?;
-        let wrapped = self.inner.wrap_points(&arr);
-        let result = PyArray2::zeros_bound(py, [n, 3], false);
-        unsafe {
-            let out = result.as_slice_mut()?;
-            ndarray3_to_numpy(&wrapped, out);
-        }
-        Ok(result)
+        let wrapped = self.inner.wrap(view);
+        Ok(wrapped.into_pyarray_bound(py))
     }
+
 
     /// Calculate displacement vectors with optional minimum image convention
     /// LAMMPS convention: uses unwrapped coordinates (xu, yu, zu)
@@ -346,30 +280,18 @@ impl PyBox {
         xyzu2: PyReadonlyArray2<f32>,
         minimum_image: bool,
     ) -> PyResult<Bound<'py, PyArray2<f32>>> {
-        let shape1 = xyzu1.shape();
-        let shape2 = xyzu2.shape();
-
-        if shape1 != shape2 {
+        let v1 = xyzu1.as_array();
+        let v2 = xyzu2.as_array();
+        if v1.raw_dim() != v2.raw_dim() {
             return Err(PyValueError::new_err(
                 "xyzu1 and xyzu2 must have the same shape",
             ));
         }
-
-        if shape1[1] != 3 {
-            return Err(PyValueError::new_err("arrays must have shape (N, 3)"));
+        if v1.ncols() != 3 {
+            return Err(PyValueError::new_err("expected shape (N,3)"));
         }
-
-        let n = shape1[0];
-        // Convert NumPy → NdArray (zero-copy borrowed view)
-        let arr1 = numpy_to_ndarray3(xyzu1)?;
-        let arr2 = numpy_to_ndarray3(xyzu2)?;
-        let d = self.inner.delta_points(&arr1, &arr2, minimum_image);
-        let result = PyArray2::zeros_bound(py, [n, 3], false);
-        unsafe {
-            let out = result.as_slice_mut()?;
-            ndarray3_to_numpy(&d, out);
-        }
-        Ok(result)
+        let d = self.inner.delta(v1, v2, minimum_image);
+        Ok(d.into_pyarray_bound(py))
     }
 
     /// Check if points are inside the primary cell
@@ -388,21 +310,12 @@ impl PyBox {
         py: Python<'py>,
         xyz: PyReadonlyArray2<f32>,
     ) -> PyResult<Bound<'py, PyArray1<bool>>> {
-        let shape = xyz.shape();
-
-        if shape[1] != 3 {
-            return Err(PyValueError::new_err("xyz must have shape (N, 3)"));
+        let view = xyz.as_array();
+        if view.ncols() != 3 {
+            return Err(PyValueError::new_err("expected shape (N,3)"));
         }
-
-        let n = shape[0];
-        // Convert NumPy → NdArray (zero-copy borrowed view)
-        let arr = numpy_to_ndarray3(xyz)?;
-        let inside = self.inner.isin_points(&arr);
-        let mut result_vec = Vec::with_capacity(n);
-        for i in 0..n {
-            result_vec.push(inside[[i]]);
-        }
-        Ok(PyArray1::from_vec_bound(py, result_vec))
+        let inside = self.inner.isin(view);
+        Ok(inside.into_pyarray_bound(py))
     }
 
     fn __repr__(&self) -> String {
@@ -414,5 +327,77 @@ impl PyBox {
 #[pymodule]
 fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyBox>()?;
+    m.add_class::<PyLinkedCell>()?;
     Ok(())
+}
+
+/// Python wrapper for the Rust LinkedCell struct
+#[pyclass(name = "LinkedCell")]
+#[derive(Clone)]
+pub struct PyLinkedCell {
+    inner: RustLinkedCell,
+}
+
+#[pymethods]
+impl PyLinkedCell {
+    /// Build a linked-cell data structure from points, cutoff, and a simulation box.
+    ///
+    /// Parameters
+    /// ----------
+    /// points : ndarray, shape (N, 3), dtype=float32
+    ///     Particle positions (x, y, z columns)
+    /// cutoff : float
+    ///     Cutoff radius for neighbor search
+    /// box : Box
+    ///     Simulation box describing PBC and geometry
+    #[new]
+    fn new(points: PyReadonlyArray2<f32>, cutoff: f32, r#box: &PyBox) -> PyResult<Self> {
+        let view = points.as_array();
+        if view.ncols() != 3 {
+            return Err(PyValueError::new_err("points must have shape (N,3)"));
+        }
+        let pts = view.to_owned();
+        let lc = RustLinkedCell::build(&pts, cutoff, &r#box.inner);
+        Ok(Self { inner: lc })
+    }
+
+    /// Compute unique neighbor pairs (i<j) within cutoff using MIC.
+    ///
+    /// Parameters
+    /// ----------
+    /// points : ndarray, shape (N, 3), dtype=float32
+    ///     Particle positions (x, y, z columns). Should match the set used to build.
+    /// cutoff : float
+    ///     Cutoff radius (can be the same as used to build)
+    ///
+    /// Returns
+    /// -------
+    /// pairs : ndarray, shape (M, 2), dtype=int64
+    ///     Array of index pairs (i, j) with i < j within cutoff.
+    fn pairs<'py>(
+        &self,
+        py: Python<'py>,
+        points: PyReadonlyArray2<f32>,
+        cutoff: f32,
+    ) -> PyResult<Bound<'py, PyArray2<i64>>> {
+        let view = points.as_array();
+        if view.ncols() != 3 {
+            return Err(PyValueError::new_err("points must have shape (N,3)"));
+        }
+        let pts = view.to_owned();
+        let pairs = self.inner.pairs(&pts, cutoff);
+        // Convert Vec<(usize, usize)> to ndarray for NumPy
+        let out_vec: Vec<[i64; 2]> = pairs
+            .into_iter()
+            .map(|(i, j)| [i as i64, j as i64])
+            .collect();
+        let n = out_vec.len();
+        let array = ndarray::Array2::from_shape_vec((n, 2), out_vec.into_iter().flatten().collect())
+            .map_err(|_| PyValueError::new_err("failed to build output array"))?;
+        Ok(array.into_pyarray_bound(py))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("LinkedCell(dims={:?})", self.inner.grid.dims)
+    }
 }

@@ -1,274 +1,379 @@
-//! Triclinic simulation box and periodic operations (array-based, no external deps).
+//! Triclinic simulation box and periodic operations based on ndarray.
 //!
 //! Conventions (fractional/cartesian):
 //! - cart = origin + H * frac
 //! - frac = H^{-1} * (cart - origin)
 //! - Lattice vectors are the columns of H.
 
-use super::region::{Point3f, Vector3f, F, PointsNx3f};
-use crate::core::array::Mat3;
-use crate::core::array::NdArray;
-use crate::core::array::Array;
+use crate::math::{det3, inv3, matmul, norm3};
+use ndarray::{array, Array1, Array2, ArrayView2, Axis, azip};
 
-/// Result type for coordinate operations returning an N×3 array (x, y, z columns)
-pub type CoordsNx3 = PointsNx3f;
+pub type F = f32;
+pub type Vec3 = Array1<F>; // length-3
+pub type Mat3 = Array2<F>; // shape (3,3)
+pub type PointsNx3 = Array2<F>; // shape (N,3) owned
 
 /// Simulation box: triclinic cell with origin and per-axis PBC mask
 #[derive(Debug, Clone)]
 pub struct Box {
     /// Triclinic cell matrix H (columns are lattice vectors)
-    pub h: Mat3<F>,
+    pub h: Mat3,
+    /// Precomputed inverse of H
+    pub inv: Mat3,
     /// Origin of the cell in Cartesian coordinates
-    pub origin: Point3f,
+    pub origin: Vec3,
     /// Per-axis periodic boundary condition flags (x, y, z)
-    pub pbc: [bool; 3],
+    pub pbc: Array1<bool>,
+}
+
+// define box error
+#[derive(Debug)]
+pub enum BoxError {
+    SingularCell,
 }
 
 impl Box {
     /// Construct from triclinic cell matrix `H`, origin `O`, and per-axis PBC flags
-    pub fn new(h: Mat3<F>, origin: Point3f, pbc: [bool; 3]) -> Self {
-        Self { h, origin, pbc }
+    pub fn new(h: Mat3, origin: Vec3, pbc: [bool; 3]) -> Self {
+        let inv = inv3(&h).expect("cell matrix is singular");
+        let pbc = array![pbc[0], pbc[1], pbc[2]];
+        Self { h, inv, origin, pbc }
+    }
+
+    pub fn try_new(h: Mat3, origin: Vec3, pbc: [bool; 3]) -> Result<Self, BoxError> {
+        if let Some(inv) = inv3(&h) {
+            let pbc = array![pbc[0], pbc[1], pbc[2]];
+            Ok(Self { h, inv, origin, pbc })
+        } else {
+            Err(BoxError::SingularCell)
+        }
     }
 
     /// Factory: cubic box with edge length `a` and origin `O`
-    pub fn cube(a: F, origin: Point3f, pbc: [bool; 3]) -> Self {
-        let h = Mat3::new(a, 0.0, 0.0,
-                          0.0, a, 0.0,
-                          0.0, 0.0, a);
+    pub fn cube(a: F, origin: Vec3, pbc: [bool; 3]) -> Self {
+        let h = array![[a, 0.0, 0.0], [0.0, a, 0.0], [0.0, 0.0, a],];
         Self::new(h, origin, pbc)
     }
 
     /// Factory: ortho box with lengths (ax, ay, az) and origin `O`
-    pub fn ortho(lengths: Vector3f, origin: Point3f, pbc: [bool; 3]) -> Self {
-        let h = Mat3::new(lengths.x, 0.0, 0.0,
-                          0.0, lengths.y, 0.0,
-                          0.0, 0.0, lengths.z);
+    pub fn ortho(lengths: Vec3, origin: Vec3, pbc: [bool; 3]) -> Self {
+        let h = array![
+            [lengths[0], 0.0, 0.0],
+            [0.0, lengths[1], 0.0],
+            [0.0, 0.0, lengths[2]],
+        ];
         Self::new(h, origin, pbc)
     }
 
     /// Cell volume (|det(H)|)
-    pub fn volume(&self) -> F { self.h.det().abs() }
+    pub fn volume(&self) -> F {
+        det3(&self.h).abs()
+    }
 
-    /// Return lattice vector by index (0,1,2) as a Vec3 (columns of H)
-    pub fn lattice_vector(&self, index: usize) -> Vector3f {
-        assert!(index < 3, "lattice_vector index must be 0..2");
-        let m = self.h.as_array();
-        // columns of H: take each row's selected column
-        Vector3f::new(m[0][index], m[1][index], m[2][index])
+    pub fn tilts(&self) -> Vec3 {
+        array![
+            self.h[[0, 1]], // xy
+            self.h[[0, 2]], // xz
+            self.h[[1, 2]], // yz
+        ]
+    }
+
+    pub fn lengths(&self) -> Vec3 {
+        array![
+            norm3(&self.lattice(0)), // |a|
+            norm3(&self.lattice(1)), // |b|
+            norm3(&self.lattice(2)), // |c|
+        ]
+    }
+
+    /// Return lattice vector by index (0,1,2) as a length-3 ndarray (columns of H)
+    pub fn lattice(&self, index: usize) -> Vec3 {
+        assert!(index < 3, "lattice index must be 0..2");
+        array![self.h[[0, index]], self.h[[1, index]], self.h[[2, index]]]
     }
 
     /// Distance from origin to nearest plane for each axis (|a|/2, |b|/2, |c|/2)
-    pub fn nearest_plane_distance(&self) -> Vector3f {
-        let a = self.lattice_vector(0);
-        let b = self.lattice_vector(1);
-        let c = self.lattice_vector(2);
-        Vector3f::new(0.5 * a.norm(), 0.5 * b.norm(), 0.5 * c.norm())
+    pub fn nearest_plane_distance(&self) -> Vec3 {
+        let a = self.lattice(0);
+        let b = self.lattice(1);
+        let c = self.lattice(2);
+        array![0.5 * norm3(&a), 0.5 * norm3(&b), 0.5 * norm3(&c)]
     }
 
-    /// Convert a single Cartesian coordinate to fractional
-    pub fn to_frac_single(&self, cart: Point3f) -> Vector3f {
-        let inv = self.h.inv().expect("cell matrix is singular");
-        let r = Vector3f::new(cart.x - self.origin.x, cart.y - self.origin.y, cart.z - self.origin.z);
-        inv * r
-    }
-
-    /// Convert a single fractional coordinate to Cartesian
-    pub fn to_cart_single(&self, frac: Vector3f) -> Point3f {
-        // r = H * frac
-        let r = self.h * frac;
-        Point3f::new(self.origin.x + r.x, self.origin.y + r.y, self.origin.z + r.z)
-    }
-
-    /// Convert Cartesian coordinates (N×3) to scaled (fractional) coordinates (N×3).
-    /// LAMMPS convention: x,y,z (Cartesian) -> xs,ys,zs (scaled/fractional)
-    pub fn to_frac_points(&self, xyz: &PointsNx3f) -> CoordsNx3 {
-        assert!(xyz.shape().len() == 2 && xyz.shape()[1] == 3, "xyz must have shape (N, 3)");
-        let n = xyz.shape()[0];
-        let inv = self.h.inv().expect("cell matrix is singular");
-        let mut out = Vec::with_capacity(n * 3);
-        for i in 0..n {
-            let base = i * 3;
-            let px = xyz.data()[base + 0];
-            let py = xyz.data()[base + 1];
-            let pz = xyz.data()[base + 2];
-            let v = Vector3f::new(px - self.origin.x, py - self.origin.y, pz - self.origin.z);
-            let f = inv * v;
-            out.push(f.x);
-            out.push(f.y);
-            out.push(f.z);
+    /// Convert Cartesian points to fractional coordinates (N×3)
+    pub fn to_frac(&self, xyz: ArrayView2<F>) -> Array2<F> {
+        assert_eq!(xyz.ncols(), 3, "to_frac expects (N,3) points");
+    let mut shifted = xyz.to_owned();
+        for j in 0..3 {
+            let o = self.origin[j];
+            shifted
+                .column_mut(j)
+                .iter_mut()
+                .for_each(|v| *v -= o);
         }
-    NdArray::from_vec(vec![n, 3], out)
+    let inv_t = self.inv.t().to_owned();
+    matmul(shifted.view(), &inv_t)
     }
 
-    /// Convert scaled (fractional) coordinates (N×3) to Cartesian coordinates (N×3).
-    /// LAMMPS convention: xs,ys,zs (scaled/fractional) -> x,y,z (Cartesian)
-    pub fn to_cart_points(&self, xyzs: &PointsNx3f) -> CoordsNx3 {
-        assert!(xyzs.shape().len() == 2 && xyzs.shape()[1] == 3, "xyzs must have shape (N, 3)");
-        let n = xyzs.shape()[0];
-        let mut out = Vec::with_capacity(n * 3);
-        for i in 0..n {
-            let base = i * 3;
-            let fx = xyzs.data()[base + 0];
-            let fy = xyzs.data()[base + 1];
-            let fz = xyzs.data()[base + 2];
-            let frac = Vector3f::new(fx, fy, fz);
-            let r = self.h * frac;
-            let cart = Point3f::new(self.origin.x + r.x, self.origin.y + r.y, self.origin.z + r.z);
-            out.push(cart.x);
-            out.push(cart.y);
-            out.push(cart.z);
+    /// Convert fractional coordinates to Cartesian points (N×3)
+    pub fn to_cart(&self, xyzs: ArrayView2<F>) -> Array2<F> {
+        assert_eq!(xyzs.ncols(), 3, "to_cart expects (N,3) points");
+    let h_t = self.h.t().to_owned();
+    let mut out = matmul(xyzs, &h_t);
+        for j in 0..3 {
+            let o = self.origin[j];
+            out.column_mut(j).iter_mut().for_each(|v| *v += o);
         }
-    NdArray::from_vec(vec![n, 3], out)
+        out
     }
 
-    /// Check whether points are inside primary cell (0 <= scaled < 1 per periodic axis).
-    /// Returns a boolean array of shape [N].
-    pub fn isin_points(&self, xyz: &PointsNx3f) -> NdArray<bool> {
-        let frac = self.to_frac_points(xyz);
-        let n = frac.shape()[0];
-        let mut out = Vec::with_capacity(n);
-        for i in 0..n {
-            let base = i * 3;
-            let xs = frac.data()[base + 0];
-            let ys = frac.data()[base + 1];
-            let zs = frac.data()[base + 2];
-            let okx = in01(self.pbc[0], xs);
-            let oky = in01(self.pbc[1], ys);
-            let okz = in01(self.pbc[2], zs);
-            out.push(okx && oky && okz);
+    /// Check if points lie within [0,1) in fractional space for enabled PBC axes.
+    pub fn isin(&self, xyz: ArrayView2<F>) -> Array1<bool> {
+        let frac = self.to_frac(xyz);
+        let n = frac.nrows();
+        let mut mask = Array1::from_elem(n, true);
+
+        if self.pbc[0] {
+            let fx = frac.index_axis(Axis(1), 0);
+            azip!((m in &mut mask, &v in fx) { *m &= v >= 0.0 && v < 1.0; });
         }
-    NdArray::from_vec(vec![n], out)
+        if self.pbc[1] {
+            let fy = frac.index_axis(Axis(1), 1);
+            azip!((m in &mut mask, &v in fy) { *m &= v >= 0.0 && v < 1.0; });
+        }
+        if self.pbc[2] {
+            let fz = frac.index_axis(Axis(1), 2);
+            azip!((m in &mut mask, &v in fz) { *m &= v >= 0.0 && v < 1.0; });
+        }
+        mask
     }
 
-
-
-    /// Displacement vector d = b - a in Cartesian, with optional minimum image in PBC.
-    pub fn delta_vec(&self, a: Point3f, b: Point3f, minimum_image: bool) -> Vector3f {
+    /// Batched displacement vectors row-wise (N×3)
+    pub fn delta(
+        &self,
+        xyzu1: ArrayView2<F>,
+        xyzu2: ArrayView2<F>,
+        minimum_image: bool,
+    ) -> Array2<F> {
+        assert_eq!(xyzu1.ncols(), 3);
+        assert_eq!(xyzu2.ncols(), 3);
+        assert_eq!(xyzu1.nrows(), xyzu2.nrows());
         if !minimum_image {
-            return b - a;
+            return &xyzu2.to_owned() - &xyzu1.to_owned();
         }
-        let inv = self.h.inv().expect("cell matrix is singular");
-        let ra = Vector3f::new(a.x - self.origin.x, a.y - self.origin.y, a.z - self.origin.z);
-        let rb = Vector3f::new(b.x - self.origin.x, b.y - self.origin.y, b.z - self.origin.z);
-        let fa = inv * ra;
-        let fb = inv * rb;
-        let mut df = Vector3f::new(fb.x - fa.x, fb.y - fa.y, fb.z - fa.z);
-        if self.pbc[0] { df.x = wrap_mi(df.x); }
-        if self.pbc[1] { df.y = wrap_mi(df.y); }
-        if self.pbc[2] { df.z = wrap_mi(df.z); }
-        self.h * df
+        // MIC path in fractional space
+        let n = xyzu1.nrows();
+        let mut s1 = xyzu1.to_owned();
+        let mut s2 = xyzu2.to_owned();
+        for j in 0..3 {
+            let o = self.origin[j];
+            s1.column_mut(j).iter_mut().for_each(|v| *v -= o);
+            s2.column_mut(j).iter_mut().for_each(|v| *v -= o);
+        }
+    let inv_t = self.inv.t().to_owned();
+        let f1 = matmul(s1.view(), &inv_t);
+        let f2 = matmul(s2.view(), &inv_t);
+        let df_raw = &f2 - &f1; // raw fractional displacement
+        let df_wrapped = df_raw.mapv(wrap_mi);
+        // Build float masks from boolean PBC flags
+        let mask: Vec3 = self.pbc.mapv(|b| if b { 1.0 } else { 0.0 });
+        let inv_mask: Vec3 = mask.mapv(|m| 1.0 - m);
+        let mask_bc = mask.broadcast((n, 3)).expect("broadcast mask");
+        let inv_mask_bc = inv_mask.broadcast((n, 3)).expect("broadcast inv mask");
+        // df = wrapped*mask + raw*(1-mask)
+        let df = df_wrapped * &mask_bc + df_raw * &inv_mask_bc;
+        // back to cart
+    let h_t = self.h.t().to_owned();
+    matmul(df.view(), &h_t)
     }
 
-    /// Compute displacement vectors between two sets of points (both N×3).
-    /// LAMMPS convention: uses unwrapped coordinates for input. Returns N×3 array of d = p2 - p1.
-    pub fn delta_points(&self, xyzu1: &PointsNx3f, xyzu2: &PointsNx3f, minimum_image: bool) -> CoordsNx3 {
-        assert!(xyzu1.shape().len() == 2 && xyzu1.shape()[1] == 3, "xyzu1 must have shape (N, 3)");
-        assert!(xyzu2.shape().len() == 2 && xyzu2.shape()[1] == 3, "xyzu2 must have shape (N, 3)");
-        assert_eq!(xyzu1.shape()[0], xyzu2.shape()[0], "xyzu1/xyzu2 must have same number of rows");
-        let n = xyzu1.shape()[0];
-        let mut out = Vec::with_capacity(n * 3);
-        for i in 0..n {
-            let b = i * 3;
-            let p1 = Point3f::new(xyzu1.data()[b + 0], xyzu1.data()[b + 1], xyzu1.data()[b + 2]);
-            let p2 = Point3f::new(xyzu2.data()[b + 0], xyzu2.data()[b + 1], xyzu2.data()[b + 2]);
-            let d = self.delta_vec(p1, p2, minimum_image);
-            out.push(d.x);
-            out.push(d.y);
-            out.push(d.z);
-        }
-    NdArray::from_vec(vec![n, 3], out)
-    }
-
-    /// Wrap unwrapped coordinates (N×3) into the primary cell (0 <= scaled < 1 for periodic axes).
-    /// LAMMPS convention: xu,yu,zu (unwrapped) -> x,y,z (wrapped)
-    pub fn wrap_points(&self, xyzu: &PointsNx3f) -> CoordsNx3 {
-    let frac = self.to_frac_points(xyzu);
-    let n = frac.shape()[0];
-    let mut data: Vec<F> = frac.data().to_vec();
-        for i in 0..n {
-            let b = i * 3;
-            if self.pbc[0] { data[b + 0] = data[b + 0] - data[b + 0].floor(); }
-            if self.pbc[1] { data[b + 1] = data[b + 1] - data[b + 1].floor(); }
-            if self.pbc[2] { data[b + 2] = data[b + 2] - data[b + 2].floor(); }
-        }
-    let wrapped_frac = NdArray::from_vec(vec![n, 3], data);
-        self.to_cart_points(&wrapped_frac)
+    /// Wrap Cartesian points into the unit cell according to PBC
+    pub fn wrap(&self, xyzu: ArrayView2<F>) -> Array2<F> {
+        assert_eq!(xyzu.ncols(), 3, "wrap expects (N,3) points");
+        let frac_orig = self.to_frac(xyzu);
+        let n = frac_orig.nrows();
+        let frac_wrapped = frac_orig.mapv(|x| x - x.floor());
+        let mask: Vec3 = self.pbc.mapv(|b| if b { 1.0 } else { 0.0 });
+        let inv_mask: Vec3 = mask.mapv(|m| 1.0 - m);
+        let mask_bc = mask.broadcast((n, 3)).expect("broadcast mask");
+        let inv_mask_bc = inv_mask.broadcast((n, 3)).expect("broadcast inv mask");
+        let frac = frac_wrapped * &mask_bc + frac_orig * &inv_mask_bc;
+        self.to_cart(frac.view())
     }
 }
 
 #[inline]
-fn in01(pbc: bool, x: F) -> bool {
-    if pbc { x >= 0.0 && x < 1.0 } else { x >= 0.0 && x < 1.0 }
+fn wrap_mi(x: F) -> F {
+    x - x.round()
 }
-
-#[inline]
-fn wrap_mi(x: F) -> F { x - x.round() }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::array::NdArray;
 
     #[test]
     fn roundtrip_frac_cart() {
         let bx = Box::ortho(
-            Vector3f::new(2.0, 3.0, 4.0), 
-            Point3f::new(0.5, -1.0, 2.0), 
-            [true, true, true]
+            array![2.0, 3.0, 4.0],
+            array![0.5, -1.0, 2.0],
+            [true, true, true],
         );
-    let pts = NdArray::from_vec(vec![2,3], vec![0.5, -1.0, 2.0, 2.5, 2.0, 6.0]);
-        let frac = bx.to_frac_points(&pts);
-        let cart = bx.to_cart_points(&frac);
-        for i in 0..2 {
-            let b = i*3;
-            assert!((pts.data()[b+0] - cart.data()[b+0]).abs() < 1e-5);
-            assert!((pts.data()[b+1] - cart.data()[b+1]).abs() < 1e-5);
-            assert!((pts.data()[b+2] - cart.data()[b+2]).abs() < 1e-5);
-        }
+        let pts = array![[0.5, -1.0, 2.0], [2.5, 2.0, 6.0]];
+        let frac = bx.to_frac(pts.view());
+        let cart = bx.to_cart(frac.view());
+        assert!((&pts - &cart).iter().all(|v| v.abs() < 1e-5));
     }
 
     #[test]
     fn wrap_into_cell() {
-        let bx = Box::cube(2.0, Point3f::origin(), [true, true, true]);
-    let pts = NdArray::from_vec(vec![2,3], vec![2.1, -0.1, 3.9, -1.9, 4.2, 0.0]);
-        let wrapped = bx.wrap_points(&pts);
-        let frac = bx.to_frac_points(&wrapped);
-        for i in 0..2 { 
-            let b = i*3;
-            let fx = frac.data()[b+0];
-            let fy = frac.data()[b+1];
-            let fz = frac.data()[b+2];
-            assert!(fx >= 0.0 && fx < 1.0, "xs[{}] = {} not in [0, 1)", i, fx);
-            assert!(fy >= 0.0 && fy < 1.0, "ys[{}] = {} not in [0, 1)", i, fy);
-            assert!(fz >= 0.0 && fz < 1.0, "zs[{}] = {} not in [0, 1)", i, fz);
+        let bx = Box::cube(2.0, array![0.0, 0.0, 0.0], [true, true, true]);
+        let pts = array![[2.1, -0.1, 3.9], [-1.9, 4.2, 0.0]];
+        let wrapped = bx.wrap(pts.view());
+        let frac = bx.to_frac(wrapped.view());
+        for i in 0..wrapped.nrows() {
+            let fx = frac[[i, 0]];
+            let fy = frac[[i, 1]];
+            let fz = frac[[i, 2]];
+            assert!(fx >= 0.0 && fx < 1.0);
+            assert!(fy >= 0.0 && fy < 1.0);
+            assert!(fz >= 0.0 && fz < 1.0);
         }
     }
 
     #[test]
     fn minimum_image_delta() {
-        let my_box = Box::ortho(
-            Vector3f::new(10.0, 10.0, 10.0), 
-            Point3f::origin(), 
-            [true, true, true]
+        let bx = Box::ortho(
+            array![10.0, 10.0, 10.0],
+            array![0.0, 0.0, 0.0],
+            [true, true, true],
         );
-    let p1 = NdArray::from_vec(vec![1,3], vec![9.0, 9.0, 9.0]);
-    let p2 = NdArray::from_vec(vec![1,3], vec![1.0, 1.0, 1.0]);
-        let d = my_box.delta_points(&p1, &p2, true);
-        let dx = d.data()[0];
-        let dy = d.data()[1];
-        let dz = d.data()[2];
-        assert!((dx.abs() - 2.0).abs() < 1e-5, "dx = {}", dx);
-        assert!((dy.abs() - 2.0).abs() < 1e-5, "dy = {}", dy);
-        assert!((dz.abs() - 2.0).abs() < 1e-5, "dz = {}", dz);
+        let p1 = array![[9.0, 9.0, 9.0]]; // 1x3
+        let p2 = array![[1.0, 1.0, 1.0]];
+        let d = bx.delta(p1.view(), p2.view(), true);
+        let dx = d[[0, 0]];
+        let dy = d[[0, 1]];
+        let dz = d[[0, 2]];
+        assert!((dx.abs() - 2.0).abs() < 1e-5);
+        assert!((dy.abs() - 2.0).abs() < 1e-5);
+        assert!((dz.abs() - 2.0).abs() < 1e-5);
     }
-    
+
     #[test]
-    fn is_in_test() {
-        let bx = Box::cube(2.0, Point3f::origin(), [true, true, true]);
-    let pts = NdArray::from_vec(vec![3,3], vec![1.0,1.0,1.0, 2.5,1.0,1.0, -0.5,1.0,1.0]);
-        let mask = bx.isin_points(&pts);
-        assert_eq!(mask[[0]], true);
-        assert_eq!(mask[[1]], false);
-        assert_eq!(mask[[2]], false);
+    fn test_construct() {
+
+        // singular box should fail
+        let b = Box::try_new(
+            array![[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            array![0.0, 0.0, 0.0],
+            [true, true, true],
+        );
+        assert!(b.is_err());
+
+        let b = Box::try_new(
+            array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            array![0.0, 0.0, 0.0],
+            [true, true, true],
+        );
+        assert!(b.is_ok());
     }
+
+    #[test]
+    fn test_get_length() {
+        let b = Box::new(array![
+            [2.0, 0.0, 0.0],
+            [0.0, 3.0, 0.0],
+            [0.0, 0.0, 4.0],
+        ], array![0.0, 0.0, 0.0], [true, true, true]);
+        let lengths = b.lengths();
+        assert_eq!(lengths, array![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_get_tilt_factor() {
+        let b = Box::new(array![
+            [2.0, 1.0, 2.0],
+            [0.0, 3.0, 3.0],
+            [0.0, 0.0, 4.0],
+        ], array![0.0, 0.0, 0.0], [true, true, true]);
+        let tilt = b.tilts();
+        assert_eq!(tilt, array![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_volume() {
+        let b = Box::new(array![
+            [2.0, 1.0, 2.0],
+            [0.0, 3.0, 3.0],
+            [0.0, 0.0, 4.0],
+        ], array![0.0, 0.0, 0.0], [true, true, true]);
+        let vol = b.volume();
+        assert!((vol - 24.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_wrap_single_particle_through_batch() {
+        let b = Box::new(array![
+            [2.0, 1.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [0.0, 0.0, 2.0],
+        ], array![0.0, 0.0, 0.0], [true, true, true]);
+        let pts = array![[0.0, -1.0, -1.0]];
+        let wrapped = b.wrap(pts.view());
+        let expected = array![[1.0, 1.0, 1.0]];
+        for j in 0..3 {
+            assert!((wrapped[[0, j]] - expected[[0, j]]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_wrap_multiple_particles() {
+        let b = Box::new(array![
+            [2.0, 1.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [0.0, 0.0, 2.0],
+        ], array![0.0, 0.0, 0.0], [true, true, true]);
+        let pts = array![[0.0, -1.0, -1.0], [0.0, 0.5, 0.0]];
+        let wrapped = b.wrap(pts.view());
+        let expected = array![[1.0, 1.0, 1.0], [2.0, 0.5, 0.0]];
+        for i in 0..wrapped.nrows() {
+            for j in 0..3 {
+                assert!((wrapped[[i, j]] - expected[[i, j]]).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn test_wrap_multiple_images() {
+        let b = Box::new(array![
+            [2.0, 1.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [0.0, 0.0, 2.0],
+        ], array![0.0, 0.0, 0.0], [true, true, true]);
+        let pts = array![[10.0, -5.0, -5.0], [0.0, 0.5, 0.0]];
+        let wrapped = b.wrap(pts.view());
+        let expected = array![[1.0, 1.0, 1.0], [2.0, 0.5, 0.0]];
+        for i in 0..wrapped.nrows() {
+            for j in 0..3 {
+                assert!((wrapped[[i, j]] - expected[[i, j]]).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn test_wrap() {
+        let b = Box::new(array![
+            [2.0, 1.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [0.0, 0.0, 2.0],
+        ], array![0.0, 0.0, 0.0], [true, true, true]);
+        let pts = array![[10.0, -5.0, -5.0], [0.0, 0.5, 0.0]];
+        let wrapped = b.wrap(pts.view());
+        let expected = array![[1.0, 1.0, 1.0], [2.0, 0.5, 0.0]];
+        for i in 0..wrapped.nrows() {
+            for j in 0..3 {
+                assert!((wrapped[[i, j]] - expected[[i, j]]).abs() < 1e-6);
+            }
+        }
+    }
+
 }

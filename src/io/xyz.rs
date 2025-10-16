@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::io::BufRead;
 use crate::io::reader::{Reader, FrameReader};
-use crate::core::array::NdArray;
 use crate::core::block::Block;
 use crate::core::frame::Frame;
+use ndarray::{ArrayD, IxDyn, Array1};
 
 // EXTXYZ comment line parser using winnow
 use winnow::combinator::{alt, separated, opt, repeat};
@@ -15,6 +15,7 @@ use winnow::token::{take_while};
 // XYZ now produces a core::Frame consisting of blocks of NdArray columns
 
 
+/// Primitive value in extended XYZ comment
 #[derive(Debug, Clone, PartialEq)]
 pub enum Primitive {
 	Str(String),
@@ -23,6 +24,7 @@ pub enum Primitive {
 	Logical(bool)
 }
 
+/// Extended value (nested arrays)
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExtValue {
     Primitive(Primitive),
@@ -30,6 +32,7 @@ pub enum ExtValue {
     Array2(Vec<Vec<Primitive>>),
 }
 
+/// Property type (S=string, I=int, R=real, L=logical)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PropType {
 	S,
@@ -38,18 +41,27 @@ pub enum PropType {
 	L,
 }
 
+/// Property specification: name, type and multiplicity
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertySpec {
+	/// Property name
 	pub name: String,
+	/// Property type
 	pub ty: PropType,
+	/// Multiplicity (1 for scalar)
 	pub m: usize,
 }
 
+/// Parsed XYZ comment line with optional extended fields
 #[derive(Debug, Clone, PartialEq)]
 pub struct XYZComment {
+	/// Key-value pairs
 	pub kv: HashMap<String, ExtValue>,
+	/// Parsed properties (from key "Properties"), if present
 	pub properties: Option<Vec<PropertySpec>>, // parsed from key "Properties" if present
+	/// Original comment line when treated as extxyz
 	pub comment: Option<String>, // original comment line when treated as extxyz
+	/// True if treated as plain XYZ
 	pub is_plain_xyz: bool,
 }
 
@@ -290,7 +302,7 @@ fn build_complete_schema(ec: &XYZComment) -> Vec<PropertySpec> {
 	])
 }
 
-fn build_block_from_props(n: usize, lines: &[String], props: &[PropertySpec]) -> Result<Block, String> {
+fn build_block_from_props(n: usize, lines: &[String], props: &[PropertySpec]) -> Result<Block<f32>, String> {
 	let cols = expand_property_columns(props);
 	let m_total = cols.len();
 	if lines.len() != n { return Err("insufficient atom lines".into()); }
@@ -323,12 +335,25 @@ fn build_block_from_props(n: usize, lines: &[String], props: &[PropertySpec]) ->
 	}
 
 	// Assemble core::Block: drop string columns (S) as Block stores numeric/boolean arrays only
-	let mut block = Block::new();
+	let mut block: Block<f32> = Block::new();
 	for ((name, ty), buf) in cols.into_iter().zip(buffers.into_iter()) {
 		match (ty, buf) {
-			(PropType::I, ColBuf::I(v)) => { let arr = NdArray::from_vec(vec![n, 1], v); block.insert(name, arr).map_err(|e| e.to_string())?; },
-			(PropType::R, ColBuf::R(v)) => { let arr = NdArray::from_vec(vec![n, 1], v); block.insert(name, arr).map_err(|e| e.to_string())?; },
-			(PropType::L, ColBuf::L(v)) => { let arr = NdArray::from_vec(vec![n, 1], v); block.insert(name, arr).map_err(|e| e.to_string())?; },
+			(PropType::I, ColBuf::I(v)) => {
+				// Cast ints to f32
+				let data: Vec<f32> = v.into_iter().map(|x| x as f32).collect();
+				let arr = Array1::from_vec(data).into_shape_with_order(IxDyn(&[n, 1])).unwrap().into_dyn();
+				block.insert(name, arr).map_err(|e| e.to_string())?;
+			},
+			(PropType::R, ColBuf::R(v)) => {
+				let arr: ArrayD<f32> = Array1::from_vec(v).into_shape_with_order(IxDyn(&[n, 1])).unwrap().into_dyn();
+				block.insert(name, arr).map_err(|e| e.to_string())?;
+			},
+			(PropType::L, ColBuf::L(v)) => {
+				// Store bool as 0/1 f32
+				let data: Vec<f32> = v.into_iter().map(|b| if b {1.0} else {0.0}).collect();
+				let arr = Array1::from_vec(data).into_shape_with_order(IxDyn(&[n, 1])).unwrap().into_dyn();
+				block.insert(name, arr).map_err(|e| e.to_string())?;
+			},
 			(PropType::S, ColBuf::S(_v)) => { /* skip string columns for now */ },
 			_ => { /* type mismatch shouldn't happen due to construction; skip */ }
 		}

@@ -3,17 +3,17 @@
 pub mod element;
 pub use element::Element;
 
-/// Lightweight array types (Vec3, Mat3, NdArray, dtypes)
-pub mod array;
+// Temporarily disable the legacy custom array module during ndarray migration
+// mod array;
 
 /// Geometric regions and predicates
 pub mod region;
-
-/// Heterogeneous, axis-0-consistent column store
+pub mod types;
 pub mod block;
-
-/// Top-level container mapping names to blocks, with frame-level metadata
 pub mod frame;
+pub mod locality;
+pub mod ecs;
+pub mod topology;
+pub mod universe;
 
-#[cfg(feature = "polars")]
-pub mod ext_polars;
+// Optional: external integrations can go behind features

@@ -12,10 +12,10 @@
 //! Example
 //! -------
 //! ```
-//! use molcore::core::region::{Region, Sphere, Point3f, PointsNx3f};
+//! use molcore::core::region::{Region, Sphere, PointsNx3f};
 //! use molcore::core::array::NdArray;
 //!
-//! let sphere = Sphere::new(Point3f::new(1.0, 2.0, 3.0), 2.0);
+//! let sphere = Sphere::new(NdArray::from_vec(vec![3], vec![1.0, 2.0, 3.0]), 2.0);
 //! let pts: PointsNx3f = NdArray::from_vec(
 //!     vec![3, 3],
 //!     vec![
@@ -30,16 +30,8 @@
 //! assert!(mask[[0]]);
 //! ```
 
-use crate::core::array::{NdArray, Vec3, Array};
-
-/// Scalar used by region types.
-pub type F = f32;
-
-/// 3D vector of `F`.
-pub type Vector3f = Vec3<F>;
-
-/// 3D point of `F`.
-pub type Point3f = Vec3<F>;
+use ndarray::{Array1, Array2, ArrayView2, array};
+use crate::core::types::{F, Point3f};
 
 /// Axis-aligned bounding box (AABB) as a 3×2 matrix.
 ///
@@ -50,11 +42,11 @@ pub type Point3f = Vec3<F>;
 ///   [min_y, max_y],
 ///   [min_z, max_z] ]
 /// Bounds as a 3×2 row-major array: rows=x/y/z; cols=(min, max)
-pub type Bounds3f = NdArray<F>;
+pub type Bounds3f = Array2<F>;
 
 /// N×3 matrix of points; each row is a point (x, y, z).
 /// Points as an N×3 row-major array (each row is x,y,z)
-pub type PointsNx3f = NdArray<F>;
+pub type PointsNx3f = Array2<F>;
 
 /// Region trait for geometric queries.
 pub trait Region {
@@ -74,7 +66,7 @@ pub trait Region {
 }
 
 /// A solid sphere region.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Sphere {
     /// Center of the sphere.
     pub center: Point3f,
@@ -100,12 +92,12 @@ impl Sphere {
 impl Region for Sphere {
     fn bounds(&self) -> Bounds3f {
         let r = self.radius;
-        let min = Vector3f::new(self.center.x - r, self.center.y - r, self.center.z - r);
-        let max = Vector3f::new(self.center.x + r, self.center.y + r, self.center.z + r);
+    let min = NdArray::from_vec(vec![3], vec![self.center.x() - r, self.center.y() - r, self.center.z() - r]);
+    let max = NdArray::from_vec(vec![3], vec![self.center.x() + r, self.center.y() + r, self.center.z() + r]);
         // Row-major [ [min_x,max_x], [min_y,max_y], [min_z,max_z] ]
     NdArray::from_vec(
             vec![3, 2],
-            vec![min.x, max.x, min.y, max.y, min.z, max.z],
+            vec![min[[0]], max[[0]], min[[1]], max[[1]], min[[2]], max[[2]]],
         )
     }
 
@@ -122,9 +114,9 @@ impl Region for Sphere {
             let px = points.data()[base + 0];
             let py = points.data()[base + 1];
             let pz = points.data()[base + 2];
-            let dx = px - self.center.x;
-            let dy = py - self.center.y;
-            let dz = pz - self.center.z;
+            let dx = px - self.center.x();
+            let dy = py - self.center.y();
+            let dz = pz - self.center.z();
             data.push((dx * dx + dy * dy + dz * dz) <= r2);
         }
 
@@ -139,7 +131,7 @@ mod tests {
 
     #[test]
     fn sphere_bounds_are_correct() {
-        let s = Sphere::new(Point3f::new(1.0, 2.0, 3.0), 2.0);
+        let s = Sphere::new(NdArray::from_vec(vec![3], vec![1.0, 2.0, 3.0]), 2.0);
         let b = s.bounds();
         // Row-major [ [min_x,max_x], [min_y,max_y], [min_z,max_z] ]
         assert_eq!(b[[0, 0]], -1.0);

@@ -1,7 +1,10 @@
+//! Element data and basic lookup utilities.
 use core::str::FromStr;
 
+/// Chemical element (partial table)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Element {
+    /// Hydrogen
     H,
     // He,
     // Li,
@@ -9,40 +12,46 @@ pub enum Element {
 }
 
 impl Element {
+    /// Atomic number (Z)
     pub const fn z(self) -> u8 {
         match self {
             Element::H => 1,
         }
     }
 
+    /// Chemical symbol (e.g., "H")
     pub const fn symbol(self) -> &'static str {
         match self {
             Element::H => "H",
         }
     }
 
+    /// English element name
     pub const fn name(self) -> &'static str {
         match self {
             Element::H => "Hydrogen",
         }
     }
 
+    /// Standard atomic mass (approx.)
     pub const fn atomic_mass(self) -> f32 {
         match self {
             Element::H => 1.008,
         }
     }
 
+    /// All supported elements
     pub const ALL: &'static [Element] = &[
         Element::H,
     ];
 
+    /// Lookup by atomic number
     pub fn by_number(z: u8) -> Option<Element> {
         Self::ALL.iter().copied().find(|e| e.z() == z)
     }
 
+    /// Lookup by symbol (case-insensitive)
     pub fn by_symbol(sym: &str) -> Option<Element> {
-        let s = sym.as_bytes();
         Self::ALL
             .iter()
             .copied()
